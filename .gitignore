@@ -1,0 +1,76 @@
+# =========================
+# ROOT
+# =========================
+node_modules
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.github
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+
+# =========================
+# FRONTEND (Vite + React)
+# =========================
+frontend/node_modules
+frontend/dist
+frontend/build
+
+# =========================
+# BACKEND (Rust + Tauri)
+# =========================
+backend/node_modules
+
+# Cargo / Rust build artifacts
+target
+backend/target
+backend/src-tauri/target
+src-tauri/target
+
+# Rust backup files
+**/*.rs.bk
+
+# Tauri debug/release
+backend/src-tauri/target/debug
+backend/src-tauri/target/release
+backend/target/debug
+backend/target/release
+
+# =========================
+# Tauri generated files
+# =========================
+src-tauri/gen
+backend/src-tauri/gen
+
+# =========================
+# Tauri .app and .exe bundles
+# Databases
+# =========================
+*.app
+*.exe
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+# Misc
+# =========================
+dist
+build
+# Vite cache
+.vite
+
+# Coverage
+coverage

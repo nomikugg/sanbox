@@ -1,0 +1,16 @@
+{
+  "name": "sandbox",
+  "type": "module",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "tauri": "tauri dev --config backend/tauri.conf.json",
+    "tauri:dev": "tauri dev --config backend/tauri.conf.json",
+    "tauri:build": "tauri build --config backend/tauri.conf.json"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1"
+  }
+}
