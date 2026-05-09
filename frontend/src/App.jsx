@@ -1,18 +1,22 @@
+// App.jsx
+import { CustomTitlebar } from './components/CustomTitleBar.jsx';
 import { useEffect, useMemo, useReducer, useState } from 'react';
-import { SidebarProvider, SiderbarTrigger } from '@/components/ui/sidebar.jsx';
+import { SidebarProvider } from '@/components/ui/sidebar.jsx';
 import CodeEditor from './components/editor/CodeEditor.jsx';
-import Explorer from './components/Explorer.jsx';
 import ConsolePanel from './components/ConsolePanel.jsx';
 import DebuggerPanel from './components/DebuggerPanel.jsx';
 import RuntimeSelector from './components/RuntimeSelector.jsx';
 import { initialState, appReducer } from './state/appState.js';
 import useHotkeys from './hooks/useHotkeys.js';
 import useIpc from './hooks/useIpc.js';
-import { ThemeToggle } from './components/theme/theme-toggle.jsx';
-import AppSidebar from './components/AppSidebar.js';
+import AppSidebar from './components/AppSidebar.jsx';
+import GroupIcons from './components/GroupIcons.jsx';
+import { useStatusBar } from './contexts/StatusBarContext.jsx';
+import StatusBar from './components/StatusBar.jsx';
+import { Metrics } from './components/Metrics.jsx';
 
 const starterCode = `const values = [1, 2, 3, 4];
-console.log('RunJS Pro ready');
+console.log('My first Sandbox...');
 console.log({ sum: values.reduce((acc, value) => acc + value, 0) });
 `;
 
@@ -22,6 +26,26 @@ export default function App() {
     code: starterCode,
   });
   const ipc = useIpc();
+  const { setStatus, setMetrics } = useStatusBar();
+  
+  // Actualizar StatusBar cuando cambie el estado
+  useEffect(() => {
+    if (state.isExecuting) {
+      setStatus('running');
+    } else if (state.isDebugging) {
+      setStatus('debugging');
+    } else if (state.error) {
+      setStatus('error');
+    } else {
+      setStatus('idle');
+    }
+    
+    setMetrics({
+      executionTime: state.metrics.executionTime,
+      memoryBytes: state.metrics.memoryBytes,
+      cpuMs: state.metrics.cpuMs,
+    });
+  }, [state.isExecuting, state.isDebugging, state.error, state.metrics, setStatus, setMetrics]);
   
   useHotkeys({
     onRun: () => handleExecute(),
@@ -87,88 +111,114 @@ export default function App() {
     dispatch({ type: 'execution.stopped' });
   }
   
+  const handleNewFile = () => {
+    dispatch({ type: 'code.change', payload: starterCode });
+    dispatch({ type: 'history.select', payload: null });
+  };
+
+  const handleOpenFolder = async () => {
+    console.log('Abrir carpeta');
+  };
+
+  const handleSave = async () => {
+    console.log('Guardar archivo');
+  };
+
   if (!mounted) return null;
   
   return (
-    <div className="grid grid-cols-[320px_minmax(0,1fr)] h-full">
+    <>
+      <CustomTitlebar
+        onExecute={handleExecute}
+        onDebug={handleDebug}
+        onStop={handleStop}
+        isExecuting={state.isExecuting}
+        isDebugging={state.isDebugging}
+        activeExecutionId={state.activeExecutionId}
+        onNewFile={handleNewFile}
+        onOpenFolder={handleOpenFolder}
+        onSave={handleSave}
+      />
+      
+      <SidebarProvider defaultOpen={true}>
+        <div className="flex flex-col h-screen w-full pt-10">  {/* ← Cambiar a flex-col */}
+          
+          {/* Contenido principal */}
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+            {/* Sidebar */}
+            <AppSidebar 
+              history={state.history}
+              snippets={state.snippets}
+              activeHistoryId={state.activeHistoryId}
+              onOpenSnippet={(snippet) => dispatch({ type: 'snippet.open', payload: snippet })}
+              onSelectHistory={(id) => dispatch({ type: 'history.select', payload: id })}
+            />
+            
+            {/* Workspace */}
+            <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
+              <header className="flex justify-between items-center gap-4 p-4 px-5 backdrop-blur-sm border-b border-border flex-shrink-0">
+                <RuntimeSelector
+                  runtime={state.runtime}
+                  securityMode={state.securityMode}
+                  onRuntimeChange={(runtime) => dispatch({ type: 'runtime.change', payload: runtime })}
+                  onSecurityModeChange={(mode) => dispatch({ type: 'security.change', payload: mode })}
+                />
+                <GroupIcons
+                  onDebug={handleDebug}
+                  onExecute={handleExecute}
+                  onStop={handleStop}
+                  isDebugging={state.isDebugging}
+                  isExecuting={state.isExecuting}
+                  activeExecutionId={state.activeExecutionId}
+                />
+              </header>
 
-      {/* Sidebar */}
-      <aside className="bg-sidebar border-r border-border p-5 flex flex-col gap-5 backdrop-blur-lg">
-        <div className="flex gap-3.5 items-center">
-          <div className="w-12 h-12 rounded-2xl grid place-items-center bg-gradient-to-br from-accent-strong to-accent text-[#001018] font-extrabold shadow-lg">
-            SB
+              <section className="flex-1 min-h-0 grid grid-cols-[minmax(0,1fr)_360px] gap-4 p-4">
+                <div className="bg-card/80 border border-border rounded-2xl shadow-lg overflow-hidden flex flex-col min-h-0">
+                  <div className="p-3 px-4 text-muted-foreground text-xs uppercase tracking-wide border-b border-border flex-shrink-0">
+                    Editor
+                  </div>
+                  <div className="flex-1 min-h-0">
+                    <CodeEditor
+                      value={state.code}
+                      onChange={(code) => dispatch({ type: 'code.change', payload: code })}
+                      onExecute={handleExecute}
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-card/80 border border-border rounded-2xl shadow-lg overflow-hidden flex flex-col min-h-0">
+                  <div className="p-3 px-4 text-muted-foreground text-xs uppercase tracking-wide border-b border-border flex-shrink-0">
+                    Debugger
+                  </div>
+                  <div className="flex-1 overflow-auto">
+                    <DebuggerPanel
+                      debuggerState={state.debugger}
+                      activeSnippet={activeSnippet}
+                      onStep={() => dispatch({ type: 'debug.step' })}
+                      onToggleBreakpoint={(line) => dispatch({ type: 'debug.breakpoint.toggle', payload: line })}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <section className="h-64 flex-shrink-0 p-4 pt-0">  {/* ← Altura fija para Console */}
+                <div className="bg-card/80 border border-border rounded-2xl shadow-lg overflow-hidden h-full">
+                  <ConsolePanel 
+                    logs={state.logs}
+                    error={state.error}
+                    metrics={state.metrics}
+                    isExecuting={state.isExecuting}
+                  />
+                </div>
+              </section>
+            </main>
           </div>
-          <div>
-            <div className="text-lg font-bold">Sandbox</div>
-            <div className="text-muted-foreground text-xs">Secure multi-runtime lab</div>
-          </div>
+          
+          {/* StatusBar */}
+          <StatusBar />
         </div>
-        <Explorer
-          history={state.history}
-          snippets={state.snippets}
-          activeHistoryId={state.activeHistoryId}
-          onOpenSnippet={(snippet) => dispatch({ type: 'snippet.open', payload: snippet })}
-          onSelectHistory={(id) => dispatch({ type: 'history.select', payload: id })}
-        />
-      </aside>
-
-      {/* Workspace */}
-      <main className="grid grid-rows-[auto_minmax(0,1fr)_320px] min-w-0">
-        <header className="flex justify-between items-center gap-4 p-4 px-5 bg-topbar backdrop-blur-sm border-b border-border">
-          <RuntimeSelector
-            runtime={state.runtime}
-            securityMode={state.securityMode}
-            onRuntimeChange={(runtime) => dispatch({ type: 'runtime.change', payload: runtime })}
-            onSecurityModeChange={(mode) => dispatch({ type: 'security.change', payload: mode })}
-          />
-          <div className="flex gap-2.5">
-            <ThemeToggle />
-            <button className="px-4 py-2.5 rounded-xl bg-muted/10 border border-border text-foreground hover:translate-y-[-1px] transition-all" onClick={handleDebug} disabled={state.isDebugging}>
-              Debug
-            </button>
-            <button className="px-4 py-2.5 rounded-xl bg-gradient-to-br from-accent-strong to-accent text-[#021019] font-bold hover:translate-y-[-1px] transition-all" onClick={handleExecute} disabled={state.isExecuting}>
-              {state.isExecuting ? 'Running...' : 'Run'}
-            </button>
-            <button className="px-4 py-2.5 rounded-xl bg-muted/10 border border-border text-foreground hover:translate-y-[-1px] transition-all" onClick={handleStop}>
-              Stop
-            </button>
-          </div>
-        </header>
-
-        <section className="grid grid-cols-[minmax(0,1fr)_360px] min-h-0">
-          <div className="bg-card/80 border border-border rounded-2xl m-4 shadow-lg overflow-hidden grid grid-rows-[auto_minmax(0,1fr)]">
-            <div className="p-3 px-4 text-muted-foreground text-xs uppercase tracking-wide border-b border-border">
-              Editor
-            </div>
-            <CodeEditor
-              value={state.code}
-              onChange={(code) => dispatch({ type: 'code.change', payload: code })}
-              onExecute={handleExecute}
-            />
-          </div>
-
-          <div className="bg-card/80 border border-border rounded-2xl m-4 shadow-lg overflow-hidden">
-            <div className="p-3 px-4 text-muted-foreground text-xs uppercase tracking-wide border-b border-border">
-              Debugger
-            </div>
-            <DebuggerPanel
-              debuggerState={state.debugger}
-              activeSnippet={activeSnippet}
-              onStep={() => dispatch({ type: 'debug.step' })}
-              onToggleBreakpoint={(line) => dispatch({ type: 'debug.breakpoint.toggle', payload: line })}
-            />
-          </div>
-        </section>
-
-        <section className="min-h-0">
-          <div className="bg-card/80 border border-border rounded-2xl m-4 mt-0 shadow-lg overflow-hidden h-[calc(100%-16px)]">
-            <div className="p-3 px-4 text-muted-foreground text-xs uppercase tracking-wide border-b border-border">
-              Console
-            </div>
-            <ConsolePanel logs={state.logs} error={state.error} metrics={state.metrics} />
-          </div>
-        </section>
-      </main>
-    </div>
+      </SidebarProvider>
+    </>
   );
 }

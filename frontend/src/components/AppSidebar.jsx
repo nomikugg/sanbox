@@ -1,6 +1,5 @@
 import {
   Sidebar,
-  SidebarProvider,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
@@ -20,37 +19,39 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Settings, ChevronDown, Home, LogOut, Plus, User2 } from "lucide-react";
+import Explorer from "./Explorer";
 
-export default function AppSidebar() {
-  const {
-    state,
-    open,
-    setOpen,
-    isMobile,
-    toggleSidebar,
-  } = useSidebar();
 
+export default function AppSidebar({
+  history,
+  snippets,
+  activeHistoryId,
+  onOpenSnippet,
+  onSelectHistory
+}) {
+  const { open } = useSidebar();
+  
+  
   return (
-      <Sidebar className="" dir="ltr" collapsible="icon" variant="inset">
+      <Sidebar className="pt-10 pb-5" dir="ltr" collapsible="icon" variant="inset">
 
         {/* Sidebar Header */}
-        <SidebarHeader className="">
+        <SidebarHeader className="flex flex-row items-center justify-between p-1">
             <SidebarMenu className="">
                 <SidebarMenuItem className="">
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <SidebarMenuButton asChild isActive className="" tooltip={"hello"}>
-                                Select Workspace
-                                <ChevronDown className="ml-auto" />
-                            </SidebarMenuButton>
+                            <button className="flex w-full items-center gap-2 px-2 py-1">
+                                <span className="text-xs text-muted-foreground">Select Workspace</span>
+                                <ChevronDown className="ml-auto h-2 w-2" />
+                            </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent className="w-[--radix-popper-anchor-width]">
+                        <DropdownMenuContent className="w-2">
+                              {/* tamanio del boton  */}
                             <DropdownMenuItem className="" inset={false}>
-                                <span>Acme Inc</span>
+                                <span className="text-xs">Initial Work</span>
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -59,24 +60,42 @@ export default function AppSidebar() {
         </SidebarHeader>
 
         {/* Sidebar Content */}
-        <SidebarContent className="">
+        <SidebarContent className="p-1">
           <SidebarGroup className="">
+            <Explorer
+                history={history}
+                snippets={snippets}
+                activeHistoryId={activeHistoryId}
+                onOpenSnippet={onOpenSnippet}
+                onSelectHistory={onSelectHistory}
+            />
+          </SidebarGroup>
+          {/* <SidebarGroup className="">
             <SidebarGroupLabel className="">Application</SidebarGroupLabel>
             <SidebarGroupAction className="">
                 <Plus /> <span className="sr-only">Add Project</span>
             </SidebarGroupAction>
             <SidebarGroupContent className=""></SidebarGroupContent>
-          </SidebarGroup>
+          </SidebarGroup> */}
 
           <SidebarGroup className="" />
         </SidebarContent>
 
         {/* Sidebar Footer */}
-        <SidebarFooter className="">
+        <SidebarFooter className="p-1">
             <SidebarMenu className="">
                 <SidebarMenuItem className="">
                     <SidebarMenuButton tooltip={null} className="">
-                      <User2 /> Username
+                      <User2 /> User
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem className="">
+                    <SidebarMenuButton tooltip={null} className="" asChild>
+                        <a href="#">
+                        <Settings />
+                        <span>Settings</span>
+                        </a>
                     </SidebarMenuButton>
                 </SidebarMenuItem>
 
@@ -87,7 +106,7 @@ export default function AppSidebar() {
                         <span>Home</span>
                         </a>
                     </SidebarMenuButton>
-                    <SidebarMenuBadge className="ml-auto">24</SidebarMenuBadge>
+                    {/* <SidebarMenuBadge className="ml-auto">24</SidebarMenuBadge> */}
                     <SidebarMenuAction className="ml-auto">
                         <Plus /> <span className="sr-only">Add Project</span>
                     </SidebarMenuAction>
@@ -96,8 +115,8 @@ export default function AppSidebar() {
                 <SidebarMenuItem className="">
                     <SidebarMenuButton tooltip={null} className="" asChild>
                     <button onClick={() => console.log('Cerrar sesión')}>
-                        <LogOut className="h-4 w-4" />
-                        <span>Cerrar sesión</span>
+                        <LogOut className="w-4" />
+                        <span>Logout</span>
                     </button>
                     </SidebarMenuButton>
                 </SidebarMenuItem>
