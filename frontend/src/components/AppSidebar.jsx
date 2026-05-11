@@ -35,7 +35,7 @@ export default function AppSidebar({
   
   
   return (
-      <Sidebar className="pt-10 pb-5" dir="ltr" collapsible="icon" variant="inset">
+      <Sidebar className="pt-10   pb-5" dir="ltr" collapsible="icon" variant="inset">
 
         {/* Sidebar Header */}
         <SidebarHeader className="flex flex-row items-center justify-between p-1">

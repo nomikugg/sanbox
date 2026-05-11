@@ -1,12 +1,15 @@
 import Editor from '@monaco-editor/react';
 import { useTheme } from 'next-themes';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { LiveEvaluator } from '@/lib/liveEvaluator';
 
-export default function CodeEditor({ value, onChange, onExecute }) {
+export default function CodeEditor({ value, onChange, onExecute, onLiveResults }) {
   const { theme } = useTheme();
 
   const editorRef = useRef(null);
   const monadoRef = useRef(null);
+  const evaluatorRef = useRef(new LiveEvaluator());
+  const [decorations, setDecorations] = useState([]);
 
   // Definir temas personzalidos para modo oscuro y claro
   const defineCustomThemes = (monaco) => {
@@ -46,6 +49,18 @@ export default function CodeEditor({ value, onChange, onExecute }) {
     });
   };
 
+
+  // Evaluación en tiempo real mientras escribe
+  const handleChange = (nextValue) => {
+    onChange(nextValue ?? '');
+    
+    // Evaluar código en tiempo real
+    evaluatorRef.current.evaluate(nextValue ?? '', (results) => {
+      onLiveResults?.(results);
+    });
+  };
+
+  // Configuración inicial del editor
   const handleMount = (editor, monaco) => {
     editorRef.current = editor;
     monadoRef.current = monaco;
@@ -53,6 +68,8 @@ export default function CodeEditor({ value, onChange, onExecute }) {
     // Aplicar el tema correspondiente según el modo actual
     const themeToApply = theme === 'dark' ? 'custom-dark' : 'custom-light';
     editor.updateOptions({ theme: themeToApply });
+
+    // Atajo Ctrl+Enter para ejecutar código
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, onExecute);
   };
 
@@ -72,7 +89,7 @@ export default function CodeEditor({ value, onChange, onExecute }) {
       defaultLanguage="javascript"
       // theme={monacoTheme}
       value={value}
-      onChange={(nextValue) => onChange(nextValue ?? '')}
+      onChange={handleChange}
       options={{
         fontSize: 14,
         minimap: { 
@@ -83,6 +100,8 @@ export default function CodeEditor({ value, onChange, onExecute }) {
         scrollBeyondLastLine: false,
         smoothScrolling: true,
         tabSize: 2,
+        lineNumbers: 'on',
+        glyphMargin: true,
       }}      
       onMount={handleMount}
     />

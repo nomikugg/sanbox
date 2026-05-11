@@ -27,6 +27,8 @@ export default function App() {
   });
   const ipc = useIpc();
   const { setStatus, setMetrics } = useStatusBar();
+
+  const [liveResults, setLiveResults] = useState([]);
   
   // Actualizar StatusBar cuando cambie el estado
   useEffect(() => {
@@ -156,7 +158,7 @@ export default function App() {
             
             {/* Workspace */}
             <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
-              <header className="flex justify-between items-center gap-4 p-4 px-5 backdrop-blur-sm border-b border-border flex-shrink-0">
+              <header className="flex justify-between items-center gap-4 p-4 px-5 backdrop-blur-sm border-b border-border shrink-0">
                 <RuntimeSelector
                   runtime={state.runtime}
                   securityMode={state.securityMode}
@@ -175,7 +177,7 @@ export default function App() {
 
               <section className="flex-1 min-h-0 grid grid-cols-[minmax(0,1fr)_360px] gap-4 p-4">
                 <div className="bg-card/80 border border-border rounded-2xl shadow-lg overflow-hidden flex flex-col min-h-0">
-                  <div className="p-3 px-4 text-muted-foreground text-xs uppercase tracking-wide border-b border-border flex-shrink-0">
+                  <div className="p-3 px-4 text-muted-foreground text-xs uppercase tracking-wide border-b border-border shrink-0">
                     Editor
                   </div>
                   <div className="flex-1 min-h-0">
@@ -183,12 +185,13 @@ export default function App() {
                       value={state.code}
                       onChange={(code) => dispatch({ type: 'code.change', payload: code })}
                       onExecute={handleExecute}
+                      onLiveResults={setLiveResults}
                     />
                   </div>
                 </div>
 
                 <div className="bg-card/80 border border-border rounded-2xl shadow-lg overflow-hidden flex flex-col min-h-0">
-                  <div className="p-3 px-4 text-muted-foreground text-xs uppercase tracking-wide border-b border-border flex-shrink-0">
+                  <div className="p-3 px-4 text-muted-foreground text-xs uppercase tracking-wide border-b border-border shrink-0">
                     Debugger
                   </div>
                   <div className="flex-1 overflow-auto">
@@ -202,13 +205,14 @@ export default function App() {
                 </div>
               </section>
 
-              <section className="h-64 flex-shrink-0 p-4 pt-0">  {/* ← Altura fija para Console */}
+              <section className="h-64 shrink-0 p-4 pt-0">  {/* ← Altura fija para Console */}
                 <div className="bg-card/80 border border-border rounded-2xl shadow-lg overflow-hidden h-full">
                   <ConsolePanel 
                     logs={state.logs}
                     error={state.error}
                     metrics={state.metrics}
                     isExecuting={state.isExecuting}
+                    liveResults={liveResults}
                   />
                 </div>
               </section>
