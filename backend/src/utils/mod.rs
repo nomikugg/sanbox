@@ -1,3 +1,5 @@
+pub mod transpiler;
+
 pub fn format_stack_trace(stack: &str) -> String {
   stack
     .lines()

@@ -14,6 +14,7 @@ fn main() {
     .invoke_handler(tauri::generate_handler![
       ipc::commands::execute_code,
       ipc::commands::debug_code,
+      ipc::commands::transpile_code,
       ipc::commands::stop_execution,
     ])
     .run(tauri::generate_context!())

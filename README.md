@@ -1,4 +1,4 @@
-# RunJS Pro
+# SandBox
 
 A security-first desktop JavaScript execution environment built with Rust, Tauri, React, and Vite.
 

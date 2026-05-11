@@ -14,21 +14,26 @@ import GroupIcons from './components/GroupIcons.jsx';
 import { useStatusBar } from './contexts/StatusBarContext.jsx';
 import StatusBar from './components/StatusBar.jsx';
 import { Metrics } from './components/Metrics.jsx';
+import { Plus, X } from 'lucide-react';
 
-const starterCode = `const values = [1, 2, 3, 4];
-console.log('My first Sandbox...');
-console.log({ sum: values.reduce((acc, value) => acc + value, 0) });
-`;
+const starterCode = `const values = [1, 2, 3, 4];`;
 
 export default function App() {
-  const [state, dispatch] = useReducer(appReducer, {
-    ...initialState,
-    code: starterCode,
-  });
+  const [state, dispatch] = useReducer(appReducer, (() => {
+    const firstTab = { ...initialState.tabs[0], code: starterCode };
+    return {
+      ...initialState,
+      code: starterCode,
+      tabs: [firstTab],
+      activeTabId: firstTab.id,
+    };
+  })());
   const ipc = useIpc();
   const { setStatus, setMetrics } = useStatusBar();
 
   const [liveResults, setLiveResults] = useState([]);
+  const [editingTabId, setEditingTabId] = useState(null);
+  const [tabTitleDraft, setTabTitleDraft] = useState('');
   
   // Actualizar StatusBar cuando cambie el estado
   useEffect(() => {
@@ -60,13 +65,23 @@ export default function App() {
     () => state.history.find((item) => item.id === state.activeHistoryId) ?? null,
     [state.activeHistoryId, state.history],
   );
+
+  const activeTab = useMemo(
+    () => state.tabs.find((tab) => tab.id === state.activeTabId) ?? state.tabs[0],
+    [state.activeTabId, state.tabs],
+  );
+
+  useEffect(() => {
+    setLiveResults([]);
+  }, [activeTab?.id]);
   
   async function handleExecute() {
     dispatch({ type: 'execution.start' });
     const startedAt = performance.now();
     try {
       const result = await ipc.executeCode({
-        code: state.code,
+        code: activeTab?.code ?? state.code,
+        language: activeTab?.language ?? 'js',
         runtime: state.runtime,
         mode: state.securityMode,
       });
@@ -99,7 +114,8 @@ export default function App() {
     dispatch({ type: 'debug.start' });
     try {
       const session = await ipc.debugCode({
-        code: state.code,
+        code: activeTab?.code ?? state.code,
+        language: activeTab?.language ?? 'js',
         runtime: state.runtime,
       });
       dispatch({ type: 'debug.success', payload: session });
@@ -114,8 +130,38 @@ export default function App() {
   }
   
   const handleNewFile = () => {
-    dispatch({ type: 'code.change', payload: starterCode });
+    dispatch({
+      type: 'tab.create',
+      payload: {
+        title: `Untitled ${state.tabs.length + 1}`,
+        language: activeTab?.language ?? 'js',
+        code: starterCode,
+      },
+    });
     dispatch({ type: 'history.select', payload: null });
+  };
+
+  const beginRenameTab = (tab) => {
+    setEditingTabId(tab.id);
+    setTabTitleDraft(tab.title);
+  };
+
+  const commitRenameTab = () => {
+    const trimmed = tabTitleDraft.trim();
+    const active = state.tabs.find((tab) => tab.id === editingTabId);
+    if (editingTabId && trimmed && active && trimmed !== active.title) {
+      dispatch({
+        type: 'tab.rename',
+        payload: { id: editingTabId, title: trimmed },
+      });
+    }
+    setEditingTabId(null);
+    setTabTitleDraft('');
+  };
+
+  const cancelRenameTab = () => {
+    setEditingTabId(null);
+    setTabTitleDraft('');
   };
 
   const handleOpenFolder = async () => {
@@ -165,6 +211,20 @@ export default function App() {
                   onRuntimeChange={(runtime) => dispatch({ type: 'runtime.change', payload: runtime })}
                   onSecurityModeChange={(mode) => dispatch({ type: 'security.change', payload: mode })}
                 />
+                <div className="flex items-center gap-2">
+                  <span className="text-xs uppercase tracking-wide text-muted-foreground">Language</span>
+                  <select
+                    className="h-9 rounded-md border border-border bg-background px-3 text-xs"
+                    value={activeTab?.language ?? 'js'}
+                    onChange={(event) => dispatch({ type: 'tab.language.change', payload: event.target.value })}
+                  >
+                    <option value="js">JS</option>
+                    <option value="jsx">JSX</option>
+                    <option value="ts">TS</option>
+                    <option value="tsx">TSX</option>
+                    <option value="ty">TY</option>
+                  </select>
+                </div>
                 <GroupIcons
                   onDebug={handleDebug}
                   onExecute={handleExecute}
@@ -177,15 +237,81 @@ export default function App() {
 
               <section className="flex-1 min-h-0 grid grid-cols-[minmax(0,1fr)_360px] gap-4 p-4">
                 <div className="bg-card/80 border border-border rounded-2xl shadow-lg overflow-hidden flex flex-col min-h-0">
-                  <div className="p-3 px-4 text-muted-foreground text-xs uppercase tracking-wide border-b border-border shrink-0">
-                    Editor
+                  <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 shrink-0 overflow-x-auto">
+                    <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
+                      {state.tabs.map((tab) => (
+                        <div
+                          key={tab.id}
+                          role="button"
+                          tabIndex={0}
+                          className={`group flex items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-colors whitespace-nowrap ${
+                            tab.id === state.activeTabId
+                              ? 'border-primary bg-primary/10 text-foreground'
+                              : 'border-border bg-transparent text-muted-foreground hover:bg-muted/40'
+                          }`}
+                          onClick={() => dispatch({ type: 'tab.select', payload: tab.id })}
+                          onDoubleClick={() => beginRenameTab(tab)}
+                        >
+                          {editingTabId === tab.id ? (
+                            <input
+                              autoFocus
+                              value={tabTitleDraft}
+                              onChange={(event) => setTabTitleDraft(event.target.value)}
+                              onBlur={commitRenameTab}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  commitRenameTab();
+                                }
+                                if (event.key === 'Escape') {
+                                  event.preventDefault();
+                                  cancelRenameTab();
+                                }
+                              }}
+                              onClick={(event) => event.stopPropagation()}
+                              className="min-w-0 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none"
+                            />
+                          ) : (
+                            <span onDoubleClick={(event) => {
+                              event.stopPropagation();
+                              beginRenameTab(tab);
+                            }}>
+                              {tab.title}
+                            </span>
+                          )}
+                          <span className="rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                            {tab.language}
+                          </span>
+                          {state.tabs.length > 1 && (
+                            <span
+                              className="rounded-full p-0.5 text-muted-foreground hover:bg-muted"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                dispatch({ type: 'tab.close', payload: tab.id });
+                              }}
+                            >
+                              <X className="h-3 w-3" />
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      className="inline-flex h-9 items-center gap-2 rounded-xl border border-border bg-muted/30 px-3 text-xs text-muted-foreground hover:bg-muted"
+                      onClick={handleNewFile}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      New tab
+                    </button>
                   </div>
                   <div className="flex-1 min-h-0">
                     <CodeEditor
-                      value={state.code}
+                      value={activeTab?.code ?? state.code}
+                      language={activeTab?.language ?? 'js'}
                       onChange={(code) => dispatch({ type: 'code.change', payload: code })}
                       onExecute={handleExecute}
                       onLiveResults={setLiveResults}
+                      transpileCode={ipc.transpileCode}
                     />
                   </div>
                 </div>

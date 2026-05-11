@@ -1,6 +1,7 @@
 use crate::debugger::{DebuggerCoordinator, DebugSession};
 use crate::runner::{ExecutionResponse, RuntimeKind, RuntimeManager};
 use crate::security::{PermissionPolicy, SecurityLimits, SecurityMode};
+use crate::utils::transpiler::{transpile_source, SourceLanguage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -67,6 +68,7 @@ impl From<SecurityRequest> for SecurityMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecuteCodeRequest {
   pub code: String,
+  pub language: String,
   pub runtime: RuntimeRequest,
   pub mode: SecurityRequest,
 }
@@ -74,7 +76,20 @@ pub struct ExecuteCodeRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebugCodeRequest {
   pub code: String,
+  pub language: String,
   pub runtime: RuntimeRequest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranspileCodeRequest {
+  pub code: String,
+  pub language: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranspileCodeResponse {
+  pub code: String,
+  pub source_map: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +117,7 @@ pub async fn execute_code(request: ExecuteCodeRequest, state: State<'_, AppState
       .execute(
         execution_id_for_worker,
         request.code,
+        request.language,
         request.runtime.into(),
         request.mode.into(),
         cancel,
@@ -130,6 +146,16 @@ pub async fn debug_code(request: DebugCodeRequest, state: State<'_, AppState>) -
     .prepare_session(request.code, runtime)
     .await
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn transpile_code(request: TranspileCodeRequest) -> Result<TranspileCodeResponse, String> {
+  let language = SourceLanguage::from_str(&request.language);
+  let transpiled = transpile_source(&request.code, language).map_err(|error| error.to_string())?;
+  Ok(TranspileCodeResponse {
+    code: transpiled.code,
+    source_map: transpiled.source_map,
+  })
 }
 
 #[tauri::command]

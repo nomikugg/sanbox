@@ -1,9 +1,8 @@
-// lib/liveEvaluator.js
 export class LiveEvaluator {
   constructor() {
     this.timeout = null;
-    this.debounceDelay = 500;
-    this.consoleLogs = [];
+    this.debounceDelay = 300;
+    this.requestId = 0;
   }
 
   stringify(value) {
@@ -21,92 +20,232 @@ export class LiveEvaluator {
     return String(value);
   }
 
-  evaluate(code, onResult) {
-    if (this.timeout) clearTimeout(this.timeout);
-    if (!code || code.trim().length < 2) {
-      onResult([]);
-      return;
+  looksIncomplete(code) {
+    const trimmed = code.trimEnd();
+    if (!trimmed) return true;
+
+    if (trimmed.endsWith('\\')) {
+      return true;
     }
 
-    this.timeout = setTimeout(() => {
-      const results = [];
-      const originalLog = console.log;
-      const originalError = console.error;
-      const originalWarn = console.warn;
+    const openParens = (trimmed.match(/\(/g) || []).length;
+    const closeParens = (trimmed.match(/\)/g) || []).length;
+    const openBraces = (trimmed.match(/\{/g) || []).length;
+    const closeBraces = (trimmed.match(/\}/g) || []).length;
+    const openBrackets = (trimmed.match(/\[/g) || []).length;
+    const closeBrackets = (trimmed.match(/\]/g) || []).length;
 
-      console.log = (...args) => {
-        const msg = args.map(a => this.stringify(a)).join(' ');
-        results.push({ kind: 'log', message: msg });
-        originalLog(...args);
-      };
-      console.error = (...args) => {
-        const msg = args.map(a => this.stringify(a)).join(' ');
-        results.push({ kind: 'error', message: msg });
-        originalError(...args);
-      };
-      console.warn = (...args) => {
-        const msg = args.map(a => this.stringify(a)).join(' ');
-        results.push({ kind: 'warn', message: msg });
-        originalWarn(...args);
-      };
+    if (openParens > closeParens || openBraces > closeBraces || openBrackets > closeBrackets) {
+      return true;
+    }
 
-      try {
-        // ------------------ NUEVO: usar Function con ámbito compartido ------------------
-        // 1. Ejecutar todo el código para que las declaraciones tengan efecto
-        const runner = new Function(`
-          try {
-            ${code}
-            return { success: true };
-          } catch(e) {
-            return { success: false, error: e.message };
-          }
-        `);
-        const execResult = runner();
-        if (!execResult.success) {
-          results.push({ kind: 'error', message: execResult.error });
-        }
+    if (/[=:+\-*/,&|?!]$/.test(trimmed)) {
+      return true;
+    }
 
-        // 2. Evaluar la última expresión (si existe y no es declaración)
-        const lines = code.split('\n');
-        let lastExpr = null;
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const line = lines[i].trim();
-          if (line === '' || line.startsWith('//') || line.startsWith('/*') || line.startsWith('*')) continue;
-          const isDecl = /^(const|let|var|function|class|if|for|while|switch|try|catch|return|import|export)\s/.test(line);
-          if (!isDecl && !line.includes('console.')) {
-            lastExpr = line;
-            break;
-          }
-        }
+    // Keywords that shouldn't be evaluated as incomplete (only full keywords)
+    if (/\b(const|let|var|function|class|if|for|while|switch|try|catch|return|import|export)\s*$/.test(trimmed)) {
+      return true;
+    }
 
-        if (lastExpr) {
-          try {
-            // Evaluar la expresión en el mismo ámbito (global-ish) – pero para que vea las variables,
-            // usamos eval con el contexto de la función runner? Mejor usar Function que retorna la expresión.
-            const evalFn = new Function(`return (${lastExpr})`);
-            const value = evalFn();
-            if (value !== undefined && value !== null) {
-              results.push({ kind: 'return', message: this.stringify(value) });
-            }
-          } catch (e) {
-            if (!e.message.includes('is not defined')) {
-              results.push({ kind: 'error', message: e.message });
-            }
-          }
-        }
-
-        onResult(results);
-      } catch (err) {
-        if (!err.message.includes('Unexpected')) {
-          onResult([{ kind: 'error', message: err.message }]);
-        } else {
-          onResult([]);
-        }
-      } finally {
-        console.log = originalLog;
-        console.error = originalError;
-        console.warn = originalWarn;
-      }
-    }, this.debounceDelay);
+    return false;
   }
+
+//   evaluate(code, onResult, language = 'js', transpileCode) {
+//     if (this.timeout) clearTimeout(this.timeout);
+//     if (!code || code.trim().length < 2) {
+//       onResult([]);
+//       return;
+//     }
+
+//     if (this.looksIncomplete(code)) {
+//       onResult([]);
+//       return;
+//     }
+
+//     const currentRequestId = ++this.requestId;
+
+//     this.timeout = setTimeout(async () => {
+//       const originalLog = console.log;
+//       const originalError = console.error;
+//       const originalWarn = console.warn;
+
+//       try {
+//         const compiled = typeof transpileCode === 'function'
+//           ? await transpileCode({ code, language })
+//           : { code, language };
+
+//         if (currentRequestId !== this.requestId) {
+//           return;
+//         }
+
+//         const results = [];
+//         const compiledCode = compiled?.code ?? code;
+
+//         console.log = (...args) => {
+//           const message = args.map((value) => this.stringify(value)).join(' ');
+//           results.push({ kind: 'log', message });
+//           originalLog(...args);
+//         };
+//         console.error = (...args) => {
+//           const message = args.map((value) => this.stringify(value)).join(' ');
+//           results.push({ kind: 'error', message });
+//           originalError(...args);
+//         };
+//         console.warn = (...args) => {
+//           const message = args.map((value) => this.stringify(value)).join(' ');
+//           results.push({ kind: 'warn', message });
+//           originalWarn(...args);
+//         };
+
+//         try {
+//           // Execute the entire buffer so previous declarations are in scope,
+//           // but only return the value of the last statement/expression.
+//           const lines = compiledCode.split('\n');
+//           let lastIdx = -1;
+//           for (let i = lines.length - 1; i >= 0; i--) {
+//             if (lines[i].trim()) { lastIdx = i; break; }
+//           }
+
+//           let wrapperCode = compiledCode;
+//           if (lastIdx >= 0) {
+//             const prefix = lines.slice(0, lastIdx).join('\n');
+//             let lastLine = lines[lastIdx].trim();
+//             // Remove trailing semicolon for safe wrapping
+//             lastLine = lastLine.replace(/;\s*$/, '');
+
+//             // If the last line is a declaration, just execute full code (no return)
+//             if (/^\s*(const|let|var|function|class)\b/.test(lastLine)) {
+//               wrapperCode = `(async () => { ${compiledCode}; return undefined; })()`;
+//             } else {
+//               // Wrap so we can await top-level await and return the last expression
+//               const prefixed = prefix ? `${prefix}\n` : '';
+//               // If lastLine already starts with 'await', keep it as-is
+//               const retExpr = /^\s*await\b/.test(lastLine) ? lastLine : `(${lastLine})`;
+//               wrapperCode = `(async () => { ${prefixed}try { return ${retExpr}; } catch (e) { throw e; } })()`;
+//             }
+//           }
+
+//           const value = await eval(wrapperCode);
+//           if (value !== undefined && value !== null) {
+//             results.push({ kind: 'return', message: this.stringify(value) });
+//           }
+
+//           // Tag results with the session id so the UI can group/replace them
+//           results.forEach((r) => { r._session = currentRequestId; });
+//           onResult(results);
+//         } catch (error) {
+//           const err = { kind: 'error', message: error.message, _session: currentRequestId };
+//           onResult([err]);
+//         } finally {
+//           console.log = originalLog;
+//           console.error = originalError;
+//           console.warn = originalWarn;
+//         }
+//       } catch (error) {
+//         if (currentRequestId === this.requestId) {
+//           onResult([{ kind: 'error', message: error?.message ?? String(error) }]);
+//         }
+//         console.log = originalLog;
+//         console.error = originalError;
+//         console.warn = originalWarn;
+//       }
+//     }, this.debounceDelay);
+//   }
+    evaluate(code, onResult, language, transpileCode) {
+        if (this.timeout) clearTimeout(this.timeout);
+        if (!code || code.trim().length < 2) {
+            onResult([]);
+            return;
+        }
+        if (this.looksIncomplete(code)) {
+            onResult([]);
+            return;
+        }
+
+        const currentRequestId = ++this.requestId;
+
+        this.timeout = setTimeout(async () => {
+            const originalLog = console.log;
+            const originalError = console.error;
+            const originalWarn = console.warn;
+            try {
+            const compiled = typeof transpileCode === 'function'
+                ? await transpileCode({ code, language })
+                : { code };
+
+            // ⬇️ Cancelar si ya no es la última petición
+            if (currentRequestId !== this.requestId) return;
+
+            const compiledCode = compiled?.code ?? code;
+            const results = [];
+
+            console.log = (...args) => {
+                const message = args.map(v => this.stringify(v)).join(' ');
+                results.push({ kind: 'log', message });
+                originalLog(...args);
+            };
+            console.error = (...args) => {
+                const message = args.map(v => this.stringify(v)).join(' ');
+                results.push({ kind: 'error', message });
+                originalError(...args);
+            };
+            console.warn = (...args) => {
+                const message = args.map(v => this.stringify(v)).join(' ');
+                results.push({ kind: 'warn', message });
+                originalWarn(...args);
+            };
+
+            try {
+                // Execute the entire buffer so previous declarations are in scope,
+                // but only return the value of the last statement/expression.
+                const lines = compiledCode.split('\n');
+                let lastIdx = -1;
+                for (let i = lines.length - 1; i >= 0; i--) {
+                    if (lines[i].trim()) { lastIdx = i; break; }
+                }
+
+                let wrapperCode = compiledCode;
+                if (lastIdx >= 0) {
+                    const prefix = lines.slice(0, lastIdx).join('\n');
+                    let lastLine = lines[lastIdx].trim();
+                    // Remove trailing semicolon for safe wrapping
+                    lastLine = lastLine.replace(/;\s*$/, '');
+
+                    // If the last line is a declaration, just execute full code (no return)
+                    if (/^\s*(const|let|var|function|class)\b/.test(lastLine)) {
+                    wrapperCode = `(async () => { ${compiledCode}; return undefined; })()`;
+                    } else {
+                    // Wrap so we can await top-level await and return the last expression
+                    const prefixed = prefix ? `${prefix}\n` : '';
+                    // If lastLine already starts with 'await', keep it as-is
+                    const retExpr = /^\s*await\b/.test(lastLine) ? lastLine : `(${lastLine})`;
+                    wrapperCode = `(async () => { ${prefixed}try { return ${retExpr}; } catch (e) { throw e; } })()`;
+                    }
+                }
+                const value = await eval(wrapperCode);
+                if (value !== undefined && value !== null) {
+                results.push({ kind: 'return', message: this.stringify(value) });
+                }
+                results.forEach(r => { r._session = currentRequestId; });
+                onResult(results);
+            } catch (evalError) {
+                const err = { kind: 'error', message: evalError.message, _session: currentRequestId };
+                onResult([err]);
+            } finally {
+                console.log = originalLog;
+                console.error = originalError;
+                console.warn = originalWarn;
+            }
+            } catch (transpileError) {
+            // ⬇️ Solo notificar si sigue siendo la petición actual
+            if (currentRequestId === this.requestId) {
+                onResult([{ kind: 'error', message: transpileError?.message ?? String(transpileError) }]);
+            }
+            console.log = originalLog;
+            console.error = originalError;
+            console.warn = originalWarn;
+            }
+        }, this.debounceDelay);
+    }
 }

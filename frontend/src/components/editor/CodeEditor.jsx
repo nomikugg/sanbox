@@ -3,7 +3,18 @@ import { useTheme } from 'next-themes';
 import { useEffect, useRef, useState } from 'react';
 import { LiveEvaluator } from '@/lib/liveEvaluator';
 
-export default function CodeEditor({ value, onChange, onExecute, onLiveResults }) {
+const MONACO_LANGUAGE_MAP = {
+  js: 'javascript',
+  jsx: 'javascriptreact',
+  ts: 'typescript',
+  tsx: 'typescriptreact',
+};
+
+function resolveMonacoLanguage(language) {
+  return MONACO_LANGUAGE_MAP[language] ?? 'javascript';
+}
+
+export default function CodeEditor({ value, language = 'js', onChange, onExecute, onLiveResults, transpileCode }) {
   const { theme } = useTheme();
 
   const editorRef = useRef(null);
@@ -57,7 +68,7 @@ export default function CodeEditor({ value, onChange, onExecute, onLiveResults }
     // Evaluar código en tiempo real
     evaluatorRef.current.evaluate(nextValue ?? '', (results) => {
       onLiveResults?.(results);
-    });
+    }, language, transpileCode);
   };
 
   // Configuración inicial del editor
@@ -86,7 +97,8 @@ export default function CodeEditor({ value, onChange, onExecute, onLiveResults }
   return (
     <Editor
       height="100%"
-      defaultLanguage="javascript"
+      defaultLanguage={resolveMonacoLanguage(language)}
+      language={resolveMonacoLanguage(language)}
       // theme={monacoTheme}
       value={value}
       onChange={handleChange}

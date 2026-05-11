@@ -6,23 +6,55 @@ import { Play, Terminal } from 'lucide-react';
 
 export default function ConsolePanel({ logs, error, metrics, isExecuting, liveResults }) {
   const [activeTab, setActiveTab] = useState('live'); // 'output' o 'live'
-  const [liveLogs, setLiveLogs] = useState([]);
+  const [liveSessions, setLiveSessions] = useState([]); // [{ id, entries: [] }]
 
   // Actualizar logs en vivo
   useEffect(() => {
-
-    // console.log("Se recibio los liveResults en ConsolePanel:", liveResults);
+    // Group live results by session if available to avoid duplicate entries
     if (liveResults && liveResults.length > 0) {
-      setLiveLogs(prev => {
-        const newLogs = [...prev, ...liveResults];
-        return newLogs.slice(-100);
-      });
+      setActiveTab('live');
+
+      // If results are tagged with a session id, use session grouping
+      const sessionId = liveResults[0]?._session ?? liveResults[liveResults.length - 1]?._session ?? null;
+
+      if (sessionId) {
+        setLiveSessions(prev => {
+          const lastSession = prev.length > 0 ? prev[prev.length - 1] : null;
+
+          // If the incoming session is the same as the last one, ignore (duplicate)
+          if (lastSession && lastSession.id === sessionId) return prev;
+
+          // If last session had an error and current doesn't, replace last session
+          const currentHasError = liveResults.some(r => r.kind === 'error');
+          if (lastSession && lastSession.entries.some(e => e.kind === 'error') && !currentHasError) {
+            return [...prev.slice(0, -1), { id: sessionId, entries: liveResults }].slice(-100);
+          }
+
+          return [...prev, { id: sessionId, entries: liveResults }].slice(-100);
+        });
+      } else {
+        // Fallback for untagged results: preserve previous dedupe behavior
+        setLiveSessions(prev => {
+          const lastSession = prev.length > 0 ? prev[prev.length - 1] : null;
+          const currentResult = liveResults[liveResults.length - 1];
+
+          // If last session exists and its last entry equals currentResult, skip
+          if (lastSession) {
+            const lastEntry = lastSession.entries[lastSession.entries.length - 1];
+            if (lastEntry && JSON.stringify(lastEntry) === JSON.stringify(currentResult)) {
+              return prev;
+            }
+          }
+
+          return [...prev, { id: Date.now(), entries: liveResults }].slice(-100);
+        });
+      }
     }
   }, [liveResults]);
 
   const visibleLogs = activeTab === 'output' 
     ? (logs?.length ? logs : error ? [{ kind: 'error', message: error }] : [])
-    : liveLogs;
+    : liveSessions.flatMap(s => s.entries);
 
   const formatResult = (entry) => {
     if (entry.kind === 'return') {
@@ -45,7 +77,7 @@ export default function ConsolePanel({ logs, error, metrics, isExecuting, liveRe
       <CardHeader className="py-1 px-4 border-b border-border flex flex-row items-center justify-between">
         <CardTitle className="text-xs uppercase tracking-wide text-muted-foreground flex items-center gap-2">
           <Terminal className="h-3.5 w-3.5" />
-          Console
+          Console / REPL
         </CardTitle>
         
         <div className="flex gap-1">
@@ -62,7 +94,7 @@ export default function ConsolePanel({ logs, error, metrics, isExecuting, liveRe
           <button
             onClick={() => {
               setActiveTab('live');
-              setLiveLogs([]);
+              setLiveSessions([]);
             }}
             className={`px-2 py-0.5 text-xs rounded-md transition-colors flex items-center gap-1 ${
               activeTab === 'live' 
@@ -81,14 +113,14 @@ export default function ConsolePanel({ logs, error, metrics, isExecuting, liveRe
           <div className="px-4 py-2">
             {activeTab === 'live' && (
               <div className="mb-2 text-xs text-muted-foreground bg-muted/20 p-2 rounded-md">
-                💡 Results appear automatically as you type
+                💡 REPL results appear automatically as you type in the active tab
               </div>
             )}
             
             {visibleLogs.length === 0 ? (
               <div className="text-muted-foreground text-sm py-2">
                 {activeTab === 'live' 
-                  ? 'Start typing to see live results...' 
+                  ? 'Start typing to see REPL results...' 
                   : 'No output yet. Click Run to execute.'}
               </div>
             ) : (

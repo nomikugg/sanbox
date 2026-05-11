@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { normalizeLanguage } from '../lib/transpileSource.js';
 
 const fallback = async (name) => {
   throw new Error(`Tauri IPC is not available for ${name}. Run the desktop app with \"npm run tauri\" from the workspace root.`);
@@ -18,14 +19,45 @@ async function invokeSafe(command, payload, fallbackName) {
 
 export default function useIpc() {
   return {
-    executeCode: (payload) => invokeSafe('execute_code', { request: payload }, 'execute_code'),
-    debugCode: (payload) => invokeSafe('debug_code', { request: payload }, 'debug_code'),
+    transpileCode: (payload) =>
+      invokeSafe(
+        'transpile_code',
+        {
+          request: {
+            code: payload.code,
+            language: normalizeLanguage(payload.language),
+          },
+        },
+        'transpile_code',
+      ),
+    executeCode: (payload) =>
+      invokeSafe(
+        'execute_code',
+        {
+          request: {
+            ...payload,
+            language: normalizeLanguage(payload.language),
+          },
+        },
+        'execute_code',
+      ),
+    debugCode: (payload) =>
+      invokeSafe(
+        'debug_code',
+        {
+          request: {
+            ...payload,
+            language: normalizeLanguage(payload.language),
+          },
+        },
+        'debug_code',
+      ),
     stopExecution: (executionId) =>
       invokeSafe(
         'stop_execution',
         {
-            request: { execution_id: executionId },
-          },
+          request: { execution_id: executionId },
+        },
         'stop_execution',
       ),
   };
