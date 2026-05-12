@@ -7,6 +7,19 @@ use swc_ecma_transforms_base::{fixer::fixer, hygiene::hygiene, resolver};
 use swc_ecma_transforms_react::react;
 use swc_ecma_transforms_typescript::strip;
 
+// One Globals per OS thread, initialized on first use. Amortizes atom-store and
+// mark-allocator allocation across all transpilations on that thread.
+//
+// A process-global static is unsafe here because SWC internals use Lrc (= Rc
+// without the "arc" feature), making Globals !Sync. thread_local! requires no
+// cross-thread sharing and therefore no Sync bound.
+//
+// SourceMap is intentionally NOT shared — it accumulates one SourceFile entry
+// per transpile call and would grow unboundedly in a REPL context.
+thread_local! {
+  static THREAD_GLOBALS: Globals = Globals::default();
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum SourceLanguage {
   Js,
@@ -84,7 +97,7 @@ pub fn transpile_source(source: &str, language: SourceLanguage) -> Result<Transp
     .parse_program()
     .map_err(|error| RuntimeError::Process(format!("SWC parse error: {error:?}")))?;
 
-  let mut code = GLOBALS.set(&Globals::default(), || {
+  let mut code = THREAD_GLOBALS.with(|globals| GLOBALS.set(globals, || {
     let unresolved_mark = Mark::new();
     let top_level_mark = Mark::new();
 
@@ -108,7 +121,7 @@ pub fn transpile_source(source: &str, language: SourceLanguage) -> Result<Transp
     program = program.apply(fixer(Some(&comments)));
 
     to_code_default(cm.clone(), Some(&comments), &program)
-  });
+  }));
 
   code.push_str(&format!("\n//# sourceURL={}", language.filename()));
 

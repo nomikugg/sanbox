@@ -6,35 +6,47 @@ import { Server, Shield, Terminal, Coffee, Egg } from "lucide-react"
 const runtimeIcons = {
   deno: <Terminal className="h-3.5 w-3.5" />,
   node: <Coffee className="h-3.5 w-3.5" />,
-  bun: <Egg className="h-3.5 w-3.5" />,
+  bun:  <Egg className="h-3.5 w-3.5" />,
 }
 
 const runtimeColors = {
   deno: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
   node: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  bun: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+  bun:  "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
 }
 
 const runtimeLabels = {
   deno: "Deno",
   node: "Node.js",
-  bun: "Bun",
+  bun:  "Bun",
+}
+
+// Install URL shown in the tooltip when a runtime is unavailable.
+const runtimeInstallHint = {
+  node: "Install from nodejs.org",
+  deno: "Install from deno.com",
+  bun:  "Install from bun.sh (coming soon)",
 }
 
 const securityStyles = {
-  strict: "destructive",
+  strict:   "destructive",
   balanced: "default",
-  debug: "outline",
+  debug:    "outline",
 }
 
-const DEFAULT_AVAILABILITY = { node: true, deno: true, bun: false };
+// Optimistic default capabilities shown during the IPC probe round-trip.
+const DEFAULT_CAPABILITIES = {
+  node: { installed: true,  version: null, supportsPermissions: false, supportsDebugger: false },
+  deno: { installed: true,  version: null, supportsPermissions: true,  supportsDebugger: false },
+  bun:  { installed: false, version: null, supportsPermissions: false, supportsDebugger: false },
+};
 
 export default function RuntimeSelector({
   runtime,
   securityMode,
   onRuntimeChange,
   onSecurityModeChange,
-  availability = DEFAULT_AVAILABILITY,
+  capabilities = DEFAULT_CAPABILITIES,
 }) {
   return (
     <div className="flex items-center gap-6">
@@ -51,13 +63,14 @@ export default function RuntimeSelector({
           className="gap-1"
         >
           {['deno', 'node', 'bun'].map((item) => {
-            const available = availability[item] ?? false;
+            const caps = capabilities[item] ?? DEFAULT_CAPABILITIES[item];
+            const available = caps?.installed ?? false;
+
             return (
               <Tooltip key={item}>
                 {/*
-                  Wrap in a span so the tooltip trigger receives pointer events
-                  even when the ToggleGroupItem is disabled (disabled elements
-                  do not fire pointer events in most browsers).
+                  Disabled buttons block pointer events in most browsers, so
+                  the tooltip trigger wraps a span that stays interactive.
                 */}
                 <TooltipTrigger asChild>
                   <span className="inline-flex" tabIndex={available ? undefined : -1}>
@@ -74,9 +87,19 @@ export default function RuntimeSelector({
                     </ToggleGroupItem>
                   </span>
                 </TooltipTrigger>
-                {!available && (
+
+                {/* Tooltip: version for available runtimes, install hint for unavailable */}
+                {available ? (
+                  caps.version && (
+                    <TooltipContent side="bottom">
+                      {runtimeLabels[item]} v{caps.version}
+                    </TooltipContent>
+                  )
+                ) : (
                   <TooltipContent side="bottom">
-                    {runtimeLabels[item]} is not installed
+                    <span className="font-medium">{runtimeLabels[item]} is not installed.</span>
+                    <br />
+                    <span className="text-muted-foreground">{runtimeInstallHint[item]}</span>
                   </TooltipContent>
                 )}
               </Tooltip>

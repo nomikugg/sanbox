@@ -1,6 +1,9 @@
 // App.jsx
 import { CustomTitlebar } from './components/CustomTitleBar.jsx';
 import { useEffect, useMemo, useReducer, useState } from 'react';
+import { saveSettings } from './lib/settingsStore.js';
+import { saveSession } from './lib/sessionStore.js';
+import { saveHistory } from './lib/historyStore.js';
 import { SidebarProvider } from '@/components/ui/sidebar.jsx';
 import CodeEditor from './components/editor/CodeEditor.jsx';
 import ConsolePanel from './components/ConsolePanel.jsx';
@@ -19,14 +22,32 @@ import { Plus, X } from 'lucide-react';
 
 const starterCode = `const values = [1, 2, 3, 4];`;
 
-export default function App() {
+export default function App({ initialSettings = null, initialSession = null, initialHistory = null }) {
   const [state, dispatch] = useReducer(appReducer, (() => {
-    const firstTab = { ...initialState.tabs[0], code: starterCode };
+    // ── Base: session tabs or first-launch defaults ────────────────────────
+    // starterCode is only used when no session file exists (first launch).
+    // Each persisted slice is independent — losing one file does not affect others.
+    const sessionBase = initialSession
+      ? {
+          ...initialState,
+          tabs: initialSession.tabs,
+          activeTabId: initialSession.activeTabId,
+          snippets: initialSession.snippets,
+        }
+      : (() => {
+          const firstTab = { ...initialState.tabs[0], code: starterCode };
+          return { ...initialState, tabs: [firstTab], activeTabId: firstTab.id };
+        })();
+
     return {
-      ...initialState,
-      code: starterCode,
-      tabs: [firstTab],
-      activeTabId: firstTab.id,
+      ...sessionBase,
+      // Settings override: runtime + securityMode
+      ...(initialSettings && {
+        runtime: initialSettings.runtime,
+        securityMode: initialSettings.securityMode,
+      }),
+      // History: null means file absent/corrupt — use empty default
+      ...(initialHistory !== null && { history: initialHistory }),
     };
   })());
   const ipc = useIpc();
@@ -40,9 +61,14 @@ export default function App() {
   const [liveResults, setLiveResults] = useState([]);
   const [editingTabId, setEditingTabId] = useState(null);
   const [tabTitleDraft, setTabTitleDraft] = useState('');
-  // Optimistic default: assume node/deno are present until the probe returns.
-  // bun is always false — the runtime is not yet implemented.
-  const [runtimeAvailability, setRuntimeAvailability] = useState({ node: true, deno: true, bun: false });
+  // Optimistic defaults shown during the IPC round-trip (~50ms). node and deno
+  // are assumed installed; version is null until the probe result arrives.
+  // bun.installed stays false — the runtime is not yet implemented.
+  const [runtimeCapabilities, setRuntimeCapabilities] = useState({
+    node: { installed: true,  version: null, supportsPermissions: false, supportsDebugger: false },
+    deno: { installed: true,  version: null, supportsPermissions: true,  supportsDebugger: false },
+    bun:  { installed: false, version: null, supportsPermissions: false, supportsDebugger: false },
+  });
   
   // Actualizar StatusBar cuando cambie el estado
   useEffect(() => {
@@ -67,13 +93,48 @@ export default function App() {
     onRun: () => handleExecute(),
   });
 
+  // Persist settings whenever runtime or securityMode changes. The 500ms
+  // debounce coalesces rapid successive changes into one write. Saving on
+  // mount is idempotent — it writes back whatever was loaded (or the default).
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      saveSettings({ runtime: state.runtime, securityMode: state.securityMode });
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [state.runtime, state.securityMode]);
+
+  // Persist session whenever tabs, activeTabId, or snippets change.
+  // 2s debounce: code.change fires on every keystroke so a longer window
+  // is used to avoid excessive disk writes during active editing.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      saveSession({
+        tabs: state.tabs,
+        activeTabId: state.activeTabId,
+        snippets: state.snippets,
+      });
+    }, 2000);
+    return () => clearTimeout(handle);
+  }, [state.tabs, state.activeTabId, state.snippets]);
+
+  // Persist history after execution completes. state.history only changes on
+  // execution.success and execution.failure — never on log.append or during
+  // streaming — so this effect does not fire during active execution.
+  // 5s debounce: history is low-priority; consecutive rapid executions coalesce.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      saveHistory(state.history);
+    }, 5000);
+    return () => clearTimeout(handle);
+  }, [state.history]);
+
   useEffect(() => {
     ipc.getRuntimeAvailability()
-      .then((av) => {
-        setRuntimeAvailability(av);
-        // If the default runtime is not installed, switch to the first available one.
-        if (!av[state.runtime]) {
-          const first = ['node', 'deno'].find((r) => av[r]);
+      .then((caps) => {
+        setRuntimeCapabilities(caps);
+        // If the saved runtime is not installed, switch to the first available one.
+        if (!caps[state.runtime]?.installed) {
+          const first = ['node', 'deno'].find((r) => caps[r]?.installed);
           if (first) dispatch({ type: 'runtime.change', payload: first });
         }
       })
@@ -105,8 +166,8 @@ export default function App() {
     const startedAt = performance.now();
     try {
       const result = await ipc.executeCode({
-        code: activeTab?.code ?? state.code,
-        language: activeTab?.language ?? 'js',
+        code: activeTab.code,
+        language: activeTab.language,
         runtime: state.runtime,
         mode: state.securityMode,
       });
@@ -139,8 +200,8 @@ export default function App() {
     dispatch({ type: 'debug.start' });
     try {
       const session = await ipc.debugCode({
-        code: activeTab?.code ?? state.code,
-        language: activeTab?.language ?? 'js',
+        code: activeTab.code,
+        language: activeTab.language,
         runtime: state.runtime,
       });
       dispatch({ type: 'debug.success', payload: session });
@@ -235,7 +296,7 @@ export default function App() {
                   securityMode={state.securityMode}
                   onRuntimeChange={(runtime) => dispatch({ type: 'runtime.change', payload: runtime })}
                   onSecurityModeChange={(mode) => dispatch({ type: 'security.change', payload: mode })}
-                  availability={runtimeAvailability}
+                  capabilities={runtimeCapabilities}
                 />
                 <div className="flex items-center gap-2">
                   <span className="text-xs uppercase tracking-wide text-muted-foreground">Language</span>
@@ -261,9 +322,10 @@ export default function App() {
                 />
               </header>
 
-              <section className="flex-1 min-h-0 grid grid-cols-[minmax(0,1fr)_360px] gap-4 p-4">
-                <div className="bg-card/80 border border-border rounded-2xl shadow-lg overflow-hidden flex flex-col min-h-0">
-                  <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 shrink-0 overflow-x-auto">
+              {/* Workspace Main, Console and Editor */}
+              <section className="flex-1 min-h-0 grid grid-cols-2 gap-0 px-2">
+                <div className="bg-card/80 border border-border shadow-lg overflow-hidden flex flex-col min-h-0">
+                  <div className="flex items-center justify-between gap-2 border-b px-3 py-4 shrink-0 overflow-x-auto">
                     <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
                       {state.tabs.map((tab) => (
                         <div
@@ -332,8 +394,8 @@ export default function App() {
                   </div>
                   <div className="flex-1 min-h-0">
                     <CodeEditor
-                      value={activeTab?.code ?? state.code}
-                      language={activeTab?.language ?? 'js'}
+                      value={activeTab.code}
+                      language={activeTab.language}
                       onChange={(code) => dispatch({ type: 'code.change', payload: code })}
                       onExecute={handleExecute}
                       onLiveResults={setLiveResults}
@@ -342,30 +404,33 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-card/80 border border-border rounded-2xl shadow-lg overflow-hidden flex flex-col min-h-0">
-                  <div className="p-3 px-4 text-muted-foreground text-xs uppercase tracking-wide border-b border-border shrink-0">
+                <div className="bg-card/80 border border-border flex flex-col min-h-0">
+                  {/* <div className="p-3 px-4 text-muted-foreground text-xs uppercase tracking-wide border-b border-border shrink-0">
                     Debugger
-                  </div>
+                  </div> */}
                   <div className="flex-1 overflow-auto">
-                    <DebuggerPanel
+                    <ConsolePanel 
+                      logs={state.logs}
+                      error={state.error}
+                      metrics={state.metrics}
+                      isExecuting={state.isExecuting}
+                      liveResults={liveResults}
+                    />
+                  </div>
+                </div>
+              </section>
+              
+
+              {/* Console */}
+              <section className="shrink-0 p-2 pt-0">  {/* ← Altura fija para Console */}
+                <div className="bg-card/80 border border-border shadow-lg h-full">
+                  
+                  <DebuggerPanel
                       debuggerState={state.debugger}
                       activeSnippet={activeSnippet}
                       onStep={() => dispatch({ type: 'debug.step' })}
                       onToggleBreakpoint={(line) => dispatch({ type: 'debug.breakpoint.toggle', payload: line })}
                     />
-                  </div>
-                </div>
-              </section>
-
-              <section className="h-64 shrink-0 p-4 pt-0">  {/* ← Altura fija para Console */}
-                <div className="bg-card/80 border border-border rounded-2xl shadow-lg overflow-hidden h-full">
-                  <ConsolePanel 
-                    logs={state.logs}
-                    error={state.error}
-                    metrics={state.metrics}
-                    isExecuting={state.isExecuting}
-                    liveResults={liveResults}
-                  />
                 </div>
               </section>
             </main>

@@ -3,7 +3,6 @@ const defaultTabs = [
 ];
 
 export const initialState = {
-  code: defaultTabs[0].code,
   tabs: defaultTabs,
   activeTabId: defaultTabs[0].id,
   output: null,
@@ -60,7 +59,6 @@ function updateActiveTab(state, updater) {
     ...state,
     tabs: nextTabs,
     activeTabId: nextActiveTab?.id ?? state.activeTabId,
-    code: nextActiveTab?.code ?? state.code,
   };
 }
 
@@ -80,7 +78,7 @@ function appendHistory(state, payload) {
     id: crypto.randomUUID(),
     runtime: state.runtime,
     timestamp: new Date().toISOString(),
-    code: state.code,
+    code: getActiveTab(state).code,
     output: stdout,
     error: stderr,
   };
@@ -97,13 +95,12 @@ export function appReducer(state, action) {
         ...state,
         tabs: [...state.tabs, tab],
         activeTabId: tab.id,
-        code: tab.code,
       };
     }
     case 'tab.select': {
       const tab = state.tabs.find((item) => item.id === action.payload);
       if (!tab) return state;
-      return { ...state, activeTabId: tab.id, code: tab.code };
+      return { ...state, activeTabId: tab.id };
     }
     case 'tab.close': {
       if (state.tabs.length === 1) return state;
@@ -113,7 +110,6 @@ export function appReducer(state, action) {
         ...state,
         tabs: nextTabs,
         activeTabId: nextActiveTab.id,
-        code: nextActiveTab.code,
       };
     }
     case 'tab.language.change':
@@ -136,16 +132,14 @@ export function appReducer(state, action) {
       return { ...state, runtime: action.payload };
     case 'security.change':
       return { ...state, securityMode: action.payload };
-    case 'snippet.open':
-      {
-        const tab = createTab({ title: action.payload.name, code: action.payload.code, language: 'js' });
-        return {
-          ...state,
-          tabs: [...state.tabs, tab],
-          activeTabId: tab.id,
-          code: tab.code,
-        };
-      }
+    case 'snippet.open': {
+      const tab = createTab({ title: action.payload.name, code: action.payload.code, language: 'js' });
+      return {
+        ...state,
+        tabs: [...state.tabs, tab],
+        activeTabId: tab.id,
+      };
+    }
     case 'history.select':
       return { ...state, activeHistoryId: action.payload };
     case 'execution.start':

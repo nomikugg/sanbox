@@ -12,11 +12,12 @@ use tempfile::Builder;
 
 pub struct RuntimeManager {
   sandbox: Sandbox,
+  node_permission_flag: bool,
 }
 
 impl RuntimeManager {
-  pub fn new() -> Self {
-    Self { sandbox: Sandbox::new() }
+  pub fn new(node_permission_flag: bool) -> Self {
+    Self { sandbox: Sandbox::new(), node_permission_flag }
   }
 
   pub async fn execute(
@@ -53,7 +54,7 @@ impl RuntimeManager {
     };
 
     let command = match runtime {
-      RuntimeKind::Node => node_runner::build_command(&temp_path),
+      RuntimeKind::Node => node_runner::build_command(&temp_path, self.node_permission_flag),
       RuntimeKind::Deno => deno_runner::build_command(&temp_path),
       RuntimeKind::Bun => {
         return Err(RuntimeError::Unsupported(

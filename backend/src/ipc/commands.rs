@@ -7,28 +7,89 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
-// ─── Runtime availability ─────────────────────────────────────────────────────
+// ─── Runtime capabilities ─────────────────────────────────────────────────────
 
+// Minimum Node.js major version that supports --experimental-permission.
+const NODE_PERMISSION_MIN_MAJOR: u32 = 20;
+
+/// Per-runtime capability descriptor returned to the frontend.
+/// All fields use camelCase serialisation to match JavaScript conventions.
 #[derive(Debug, Clone, Serialize)]
-pub struct RuntimeAvailability {
-  pub node: bool,
-  pub deno: bool,
-  pub bun: bool,
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCapabilities {
+  /// Binary is present on PATH and exits successfully with --version.
+  pub installed: bool,
+  /// Full semver string, e.g. "20.11.0" or "1.41.0". None if absent or unparseable.
+  pub version: Option<String>,
+  /// Runtime enforces a permission model (Node >= 20, Deno always, Bun pending).
+  pub supports_permissions: bool,
+  /// Runtime supports Chrome DevTools Protocol for debugging.
+  pub supports_debugger: bool,
 }
 
-// Checks whether `binary` is on PATH and exits successfully with --version.
-// Stdout and stderr are discarded — we only care about reachability.
-fn probe_available(binary: &str) -> bool {
-  std::process::Command::new(binary)
+impl RuntimeCapabilities {
+  fn unavailable() -> Self {
+    Self { installed: false, version: None, supports_permissions: false, supports_debugger: false }
+  }
+}
+
+/// Capabilities for every runtime the app knows about.
+#[derive(Debug, Clone, Serialize)]
+pub struct AppCapabilities {
+  pub node: RuntimeCapabilities,
+  pub deno: RuntimeCapabilities,
+  pub bun: RuntimeCapabilities,
+}
+
+fn probe_node() -> RuntimeCapabilities {
+  let output = match std::process::Command::new("node")
     .arg("--version")
-    .stdout(Stdio::null())
+    .stdout(Stdio::piped())
     .stderr(Stdio::null())
-    .status()
-    .map(|s| s.success())
-    .unwrap_or(false)
+    .output()
+  {
+    Ok(out) if out.status.success() => out,
+    _ => return RuntimeCapabilities::unavailable(),
+  };
+  // Node prints "vMAJOR.MINOR.PATCH\n"
+  let raw = std::str::from_utf8(&output.stdout).unwrap_or("").trim();
+  let version_str = raw.trim_start_matches('v');
+  let major = version_str.split('.').next().and_then(|s| s.parse::<u32>().ok());
+  let version = if version_str.is_empty() { None } else { Some(version_str.to_string()) };
+  RuntimeCapabilities {
+    installed: true,
+    version,
+    supports_permissions: major.map_or(false, |v| v >= NODE_PERMISSION_MIN_MAJOR),
+    supports_debugger: true,
+  }
+}
+
+fn probe_deno() -> RuntimeCapabilities {
+  let output = match std::process::Command::new("deno")
+    .arg("--version")
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null())
+    .output()
+  {
+    Ok(out) if out.status.success() => out,
+    _ => return RuntimeCapabilities::unavailable(),
+  };
+  // Deno prints multiple lines; the first is "deno MAJOR.MINOR.PATCH"
+  let stdout = std::str::from_utf8(&output.stdout).unwrap_or("");
+  let version = stdout
+    .lines()
+    .find(|line| line.starts_with("deno "))
+    .and_then(|line| line.strip_prefix("deno "))
+    .map(|v| v.trim().to_string());
+  RuntimeCapabilities {
+    installed: true,
+    version,
+    supports_permissions: true, // Deno permission model is always present
+    supports_debugger: true,
+  }
 }
 
 // ─── App state ───────────────────────────────────────────────────────────────
@@ -38,25 +99,32 @@ pub struct AppState {
   pub runtime_manager: Arc<RuntimeManager>,
   pub debugger: Arc<DebuggerCoordinator>,
   pub active_executions: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
-  pub availability: RuntimeAvailability,
+  pub capabilities: AppCapabilities,
 }
 
 impl AppState {
   pub fn new() -> Self {
-    // Probe node and deno in parallel threads so startup delay is
-    // max(node_time, deno_time) rather than their sum.
-    let node_probe = std::thread::spawn(|| probe_available("node"));
-    let deno_probe = std::thread::spawn(|| probe_available("deno"));
-    let availability = RuntimeAvailability {
-      node: node_probe.join().unwrap_or(false),
-      deno: deno_probe.join().unwrap_or(false),
-      bun: false, // reserved until the Bun runtime is implemented
+    // Probe Node and Deno in parallel so startup delay is max(node, deno) not sum.
+    let node_probe = std::thread::spawn(probe_node);
+    let deno_probe = std::thread::spawn(probe_deno);
+
+    let node = node_probe.join().unwrap_or_else(|_| RuntimeCapabilities::unavailable());
+    let deno = deno_probe.join().unwrap_or_else(|_| RuntimeCapabilities::unavailable());
+
+    // node_permission_flag is derived from the capability and passed once to
+    // RuntimeManager so the execution path never needs to re-derive it.
+    let node_permission_flag = node.supports_permissions;
+
+    let capabilities = AppCapabilities {
+      node,
+      deno,
+      bun: RuntimeCapabilities::unavailable(), // reserved until Bun is implemented
     };
     Self {
-      runtime_manager: Arc::new(RuntimeManager::new()),
+      runtime_manager: Arc::new(RuntimeManager::new(node_permission_flag)),
       debugger: Arc::new(DebuggerCoordinator::new()),
       active_executions: Arc::new(Mutex::new(HashMap::new())),
-      availability,
+      capabilities,
     }
   }
 }
@@ -216,6 +284,45 @@ pub fn stop_execution(
 }
 
 #[tauri::command]
-pub fn get_runtime_availability(state: State<'_, AppState>) -> RuntimeAvailability {
-  state.availability.clone()
+pub fn get_runtime_availability(state: State<'_, AppState>) -> AppCapabilities {
+  state.capabilities.clone()
+}
+
+// ─── App-data file I/O ───────────────────────────────────────────────────────
+// Generic read/write scoped to app_data_dir(). Used by the frontend persistence
+// layer for settings.json, session.json, etc. — no Tauri fs plugin required.
+// Filenames are sanitised to prevent path traversal.
+
+fn is_safe_filename(name: &str) -> bool {
+  !name.is_empty()
+    && !name.contains('/')
+    && !name.contains('\\')
+    && !name.contains("..")
+    && name.len() < 64
+}
+
+#[tauri::command]
+pub fn read_app_file(app: AppHandle, filename: String) -> Option<String> {
+  if !is_safe_filename(&filename) {
+    return None;
+  }
+  let path = app.path().app_data_dir().ok()?.join(&filename);
+  std::fs::read_to_string(&path).ok()
+}
+
+/// Writes `content` to `app_data_dir/filename` atomically:
+/// writes to a `.tmp` sibling first, then renames so a crash during write
+/// never leaves the target file in a partial state.
+#[tauri::command]
+pub fn write_app_file(app: AppHandle, filename: String, content: String) -> Result<(), String> {
+  if !is_safe_filename(&filename) {
+    return Err("invalid filename".into());
+  }
+  let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+  std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  let tmp = dir.join(format!("{filename}.tmp"));
+  let target = dir.join(&filename);
+  std::fs::write(&tmp, content.as_bytes()).map_err(|e| e.to_string())?;
+  std::fs::rename(&tmp, &target).map_err(|e| e.to_string())?;
+  Ok(())
 }

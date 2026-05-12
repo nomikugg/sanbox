@@ -17,6 +17,8 @@ fn main() {
       ipc::commands::transpile_code,
       ipc::commands::stop_execution,
       ipc::commands::get_runtime_availability,
+      ipc::commands::read_app_file,
+      ipc::commands::write_app_file,
     ])
     .run(tauri::generate_context!())
     .expect("failed to launch RunJS Pro");

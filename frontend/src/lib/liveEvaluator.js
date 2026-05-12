@@ -26,14 +26,24 @@ export class LiveEvaluator {
           resolve(data);
         }
       };
-      this._worker.onerror = () => this._restartWorker();
+      // onerror fires on fatal worker crashes (script load failure, uncaught
+      // exception outside onmessage). Logical errors from user code are caught
+      // inside the worker's onmessage try/catch and arrive as normal messages.
+      this._worker.onerror = () => this._restartWorker('worker crashed');
     } catch {
       this._worker = null;
     }
   }
 
-  _restartWorker() {
+  _restartWorker(reason = 'worker restarted') {
     this._worker?.terminate();
+    // Drain all in-flight requests before clearing so their awaiting callers
+    // receive an error result instead of hanging forever. The timeout path
+    // removes its own id from _pending before calling here, so it won't be
+    // double-resolved; any other concurrent requests are resolved here.
+    for (const resolve of this._pending.values()) {
+      resolve({ logs: [], error: reason });
+    }
     this._pending.clear();
     this._initWorker();
   }
@@ -91,20 +101,26 @@ export class LiveEvaluator {
    */
   evaluate(code, onResult, language, transpileCode) {
     if (this._debounceHandle) clearTimeout(this._debounceHandle);
-    if (!code || code.trim().length < 2) { onResult([]); return; }
-    if (this.looksIncomplete(code)) { onResult([]); return; }
+    // null as lineResults signals the editor: "don't touch decorations right now"
+    if (!code || code.trim().length < 2) { onResult([], null); return; }
+    if (this.looksIncomplete(code)) { onResult([], null); return; }
 
     const reqId = ++this._requestId;
 
     this._debounceHandle = setTimeout(async () => {
       try {
-        const compiled = typeof transpileCode === 'function'
-          ? await transpileCode({ code, language })
-          : { code };
+        // Transpile via Tauri; fall back to raw code if IPC is unavailable
+        let compiledCode = code;
+        if (typeof transpileCode === 'function') {
+          try {
+            const compiled = await transpileCode({ code, language });
+            compiledCode = compiled?.code ?? code;
+          } catch {
+            // Transpile failed (e.g. Tauri not ready) — run raw JS directly
+          }
+        }
 
         if (reqId !== this._requestId) return;
-
-        const compiledCode = compiled?.code ?? code;
 
         if (!this._worker) {
           onResult([{
@@ -126,7 +142,7 @@ export class LiveEvaluator {
           entries.push({ kind: 'error', message: result.error });
         }
         entries.forEach((r) => { r._session = reqId; });
-        onResult(entries);
+        onResult(entries, result.lineResults ?? []);
       } catch (err) {
         if (reqId === this._requestId) {
           onResult([{ kind: 'error', message: err?.message ?? String(err), _session: reqId }]);

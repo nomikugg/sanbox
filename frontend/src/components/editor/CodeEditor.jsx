@@ -1,6 +1,6 @@
 import Editor from '@monaco-editor/react';
 import { useTheme } from 'next-themes';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { LiveEvaluator } from '@/lib/liveEvaluator';
 
 const MONACO_LANGUAGE_MAP = {
@@ -17,15 +17,14 @@ function resolveMonacoLanguage(language) {
 export default function CodeEditor({ value, language = 'js', onChange, onExecute, onLiveResults, transpileCode }) {
   const { theme } = useTheme();
 
-  const editorRef = useRef(null);
-  const monadoRef = useRef(null);
+  const editorRef   = useRef(null);
+  const monadoRef   = useRef(null);
   const evaluatorRef = useRef(new LiveEvaluator());
-  const [decorations, setDecorations] = useState([]);
+  const decorationsRef = useRef(null);
+  // Track last value evaluated from user input to avoid double-eval on tab switch
+  const lastEvaledRef = useRef(null);
 
-  // Definir temas personzalidos para modo oscuro y claro
   const defineCustomThemes = (monaco) => {
-
-    // Tema para modo oscuro
     monaco.editor.defineTheme('custom-dark', {
       base: 'vs-dark',
       inherit: true,
@@ -42,7 +41,6 @@ export default function CodeEditor({ value, language = 'js', onChange, onExecute
       }
     });
 
-    // Tema claro
     monaco.editor.defineTheme('custom-light', {
       base: 'vs',
       inherit: true,
@@ -60,53 +58,113 @@ export default function CodeEditor({ value, language = 'js', onChange, onExecute
     });
   };
 
+  // Apply (or replace) inline result decorations for each captured line.
+  // Passing null means "code is still being typed — leave decorations alone."
+  // Passing [] means "no expressions found or error — clear decorations."
+  const updateInlineDecorations = useCallback((lineResults) => {
+    if (lineResults === null) return;
 
-  // Evaluación en tiempo real mientras escribe
+    const editor = editorRef.current;
+    const monaco = monadoRef.current;
+    if (!editor || !monaco) return;
+
+    if (!decorationsRef.current) {
+      decorationsRef.current = editor.createDecorationsCollection([]);
+    }
+
+    const model = editor.getModel();
+    if (!model) return;
+
+    const totalLines = model.getLineCount();
+    const decorations = lineResults
+      .filter(([ln]) => ln >= 1 && ln <= totalLines)
+      .map(([lineNum, valueStr]) => {
+        const col = model.getLineMaxColumn(lineNum);
+        return {
+          range: new monaco.Range(lineNum, col, lineNum, col),
+          options: {
+            after: {
+              content: `  // ${valueStr}`,
+              inlineClassName: 'live-inline-result',
+            },
+          },
+        };
+      });
+
+    decorationsRef.current.set(decorations);
+  }, []);
+
+  const runEval = useCallback((code) => {
+    evaluatorRef.current.evaluate(
+      code,
+      (entries, lineResults) => {
+        onLiveResults?.(entries);
+        updateInlineDecorations(lineResults);
+      },
+      language,
+      transpileCode,
+    );
+  }, [language, transpileCode, onLiveResults, updateInlineDecorations]);
+
+  // User keystroke: clear stale decorations immediately, then eval
   const handleChange = (nextValue) => {
-    onChange(nextValue ?? '');
-    
-    // Evaluar código en tiempo real
-    evaluatorRef.current.evaluate(nextValue ?? '', (results) => {
-      onLiveResults?.(results);
-    }, language, transpileCode);
+    const code = nextValue ?? '';
+    lastEvaledRef.current = code;
+    onChange(code);
+    decorationsRef.current?.clear();
+    runEval(code);
   };
 
-  // Configuración inicial del editor
   const handleMount = (editor, monaco) => {
     editorRef.current = editor;
     monadoRef.current = monaco;
     defineCustomThemes(monaco);
-    // Aplicar el tema correspondiente según el modo actual
-    const themeToApply = theme === 'dark' ? 'custom-dark' : 'custom-light';
-    editor.updateOptions({ theme: themeToApply });
-
-    // Atajo Ctrl+Enter para ejecutar código
+    editor.updateOptions({ theme: theme === 'dark' ? 'custom-dark' : 'custom-light' });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, onExecute);
+
+    // Initial eval — mark as evaluated so the value-change effect skips it
+    const initial = editor.getValue();
+    lastEvaledRef.current = initial;
+    runEval(initial);
   };
 
-  // Cambiar el tema dinámicamente cuando el modo cambie
   useEffect(() => {
     if (editorRef.current) {
-      const newTheme = theme === 'dark' ? 'custom-dark' : 'custom-light';
-      // editorRef.current.setTheme(newTheme);
-      editorRef.current.updateOptions({ theme: newTheme });
+      editorRef.current.updateOptions({ theme: theme === 'dark' ? 'custom-dark' : 'custom-light' });
     }
   }, [theme]);
 
+  // Re-evaluate when value prop changes from outside (tab switch).
+  // @monaco-editor/react calls editor.setValue() silently (no onChange fired),
+  // so we detect the external change by comparing against the last user-typed value.
+  useEffect(() => {
+    if (!editorRef.current || !monadoRef.current) return;
+    if (value === lastEvaledRef.current) return; // already handled by handleChange
+    lastEvaledRef.current = value;
+    decorationsRef.current?.clear();
+    runEval(value ?? '');
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    return () => {
+      evaluatorRef.current.destroy();
+      decorationsRef.current?.clear();
+    };
+  }, []);
 
   return (
     <Editor
       height="100%"
       defaultLanguage={resolveMonacoLanguage(language)}
       language={resolveMonacoLanguage(language)}
-      // theme={monacoTheme}
       value={value}
       onChange={handleChange}
       options={{
         fontSize: 14,
-        minimap: { 
-          enabled: false,
-        },
+        minimap: { enabled: false },
+        overviewRulerLanes: 0,
+        overviewRulerBorder: false,
+        hideCursorInOverviewRuler: true,
         wordWrap: 'on',
         automaticLayout: true,
         scrollBeyondLastLine: false,
@@ -114,7 +172,7 @@ export default function CodeEditor({ value, language = 'js', onChange, onExecute
         tabSize: 2,
         lineNumbers: 'on',
         glyphMargin: true,
-      }}      
+      }}
       onMount={handleMount}
     />
   );

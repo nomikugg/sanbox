@@ -14,9 +14,9 @@ pub fn validate_source(
   runtime: RuntimeKind,
   mode: SecurityMode,
   permissions: &PermissionPolicy,
-) -> Result<(), String> {
+) -> Result<(), Vec<String>> {
   if matches!(runtime, RuntimeKind::Bun) {
-    return Err("Bun runtime is scaffolded but not enabled in the production build".into());
+    return Err(vec!["Bun runtime is scaffolded but not enabled in the production build".into()]);
   }
 
   // Parse with TypeScript + JSX superset so any dialect works.
@@ -32,7 +32,7 @@ pub fn validate_source(
   if visitor.violations.is_empty() {
     Ok(())
   } else {
-    Err(visitor.violations[0].clone())
+    Err(visitor.violations)
   }
 }
 
@@ -69,7 +69,12 @@ impl<'a> SecurityVisitor<'a> {
   }
 
   fn deny(&mut self, msg: impl Into<String>) {
-    self.violations.push(msg.into());
+    let msg = msg.into();
+    // Deduplicate at push time so chained member expressions (e.g. Deno.env.get())
+    // don't produce the same violation from both the outer and inner visit passes.
+    if !self.violations.contains(&msg) {
+      self.violations.push(msg);
+    }
   }
 
   fn is_ident(expr: &Expr, name: &str) -> bool {

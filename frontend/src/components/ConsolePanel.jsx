@@ -63,13 +63,25 @@ export default function ConsolePanel({ logs, error, metrics, isExecuting, liveRe
     }
   }, [liveResults]);
 
+  // Splits an error string into console entries. A multi-violation backend error
+  // is formatted as "header\n• line\n• line", so each non-empty line becomes its
+  // own row: bullet lines are 'error', the header line is 'warn'. Single-line
+  // errors (timeouts, transpile failures) produce one 'error' entry unchanged.
+  const parseErrorEntries = (err) => {
+    if (!err) return [];
+    const lines = err.split('\n').filter(Boolean);
+    if (lines.length <= 1) return [{ kind: 'error', message: err }];
+    return lines.map((line) => ({
+      kind: line.startsWith('•') ? 'error' : 'warn',
+      message: line,
+    }));
+  };
+
   const visibleLogs =
     activeTab === 'output'
       ? logs?.length
         ? logs
-        : error
-        ? [{ kind: 'error', message: error }]
-        : []
+        : parseErrorEntries(error)
       : liveSessions.flatMap((s) => s.entries);
 
   const formatResult = (entry) => {
@@ -81,8 +93,8 @@ export default function ConsolePanel({ logs, error, metrics, isExecuting, liveRe
   };
 
   return (
-    <Card className="border-border shadow-lg overflow-hidden flex flex-col h-full rounded-t-lg">
-      <CardHeader className="py-1 px-4 border-b border-border flex flex-row items-center justify-between">
+    <Card className="border-border shadow-lg rounded-none overflow-hidden flex flex-col h-full">
+      <CardHeader className="py-0 px-4 border-b border-border flex flex-row items-center justify-between">
         <CardTitle className="text-xs uppercase tracking-wide text-muted-foreground flex items-center gap-2">
           <Terminal className="h-3.5 w-3.5" />
           Console / REPL
@@ -126,18 +138,14 @@ export default function ConsolePanel({ logs, error, metrics, isExecuting, liveRe
 
       <CardContent className="p-0 flex-1 flex flex-col">
         <ScrollArea className="flex-1">
-          <div className="px-4 py-2">
+          <div className="">
             {activeTab === 'live' && (
-              <div className="mb-2 text-xs text-muted-foreground bg-muted/20 p-2 rounded-md">
-                💡 REPL results appear automatically as you type in the active tab
+              <div className="text-xs text-muted-foreground bg-muted/20">
               </div>
             )}
 
             {visibleLogs.length === 0 ? (
               <div className="text-muted-foreground text-sm py-2">
-                {activeTab === 'live'
-                  ? 'Start typing to see REPL results...'
-                  : 'No output yet. Click Run to execute.'}
               </div>
             ) : (
               visibleLogs.map((entry, index) => {

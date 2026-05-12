@@ -49,7 +49,7 @@ pub struct ExecutionResponse {
 
 #[derive(Debug)]
 pub enum RuntimeError {
-  Validation(String),
+  Validation(Vec<String>),
   Process(String),
   Unsupported(String),
 }
@@ -57,9 +57,18 @@ pub enum RuntimeError {
 impl Display for RuntimeError {
   fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
     match self {
-      Self::Validation(message) | Self::Process(message) | Self::Unsupported(message) => {
-        write!(formatter, "{message}")
-      }
+      Self::Validation(violations) => match violations.as_slice() {
+        // Single violation: surface the message directly, identical to previous behaviour.
+        [single] => write!(formatter, "{single}"),
+        // Multiple violations: header line followed by one bulleted entry per violation.
+        violations => write!(
+          formatter,
+          "Security policy violations ({} issues):\n{}",
+          violations.len(),
+          violations.iter().map(|v| format!("• {v}")).collect::<Vec<_>>().join("\n"),
+        ),
+      },
+      Self::Process(message) | Self::Unsupported(message) => write!(formatter, "{message}"),
     }
   }
 }

@@ -163,3 +163,17 @@
     background-color: color-mix(in oklch, var(--card) 80%, transparent);
   }
 }
+
+/* ── Live eval inline result hints (Monaco injected-text decorations) ───────── */
+.live-inline-result {
+  color: #6aaa64 !important;
+  opacity: 0.82;
+  font-style: italic;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Slightly darker on light background */
+:root:not(.dark) .live-inline-result {
+  color: #1a7a34 !important;
+}
