@@ -23,6 +23,7 @@ pub enum RuntimeKind {
 pub struct LogEntry {
   pub kind: String,
   pub message: String,
+  pub timestamp: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

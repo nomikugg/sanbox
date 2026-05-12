@@ -31,14 +31,30 @@ export function CustomTitlebar({
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
-    // Detectar cuando la ventana se maximiza/restaura
-    const unlisten = appWindow.onResized(() => {
-      appWindow.isMaximized().then(setIsMaximized);
-    });
-    appWindow.isMaximized().then(setIsMaximized);
-    
+    let cancelled = false;
+    let unlistenResize = null;
+
+    const setup = async () => {
+      try {
+        const maximized = await appWindow.isMaximized();
+        if (!cancelled) setIsMaximized(maximized);
+      } catch {}
+
+      try {
+        unlistenResize = await appWindow.onResized(async () => {
+          try {
+            const maximized = await appWindow.isMaximized();
+            if (!cancelled) setIsMaximized(maximized);
+          } catch {}
+        });
+      } catch {}
+    };
+
+    setup();
+
     return () => {
-      unlisten.then(fn => fn());
+      cancelled = true;
+      unlistenResize?.();
     };
   }, []);
 
@@ -134,23 +150,23 @@ export function CustomTitlebar({
         <ThemeToggle />
         
         <button
-          onClick={() => appWindow.minimize()}
+          onClick={() => appWindow.minimize().catch(() => {})}
           className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-md p-1.5 transition-colors"
           title="Minimizar"
         >
           <Minus className="h-4 w-4" />
         </button>
-        
+
         <button
-          onClick={() => appWindow.toggleMaximize()}
+          onClick={() => appWindow.toggleMaximize().catch(() => {})}
           className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-md p-1.5 transition-colors"
           title={isMaximized ? "Restaurar" : "Maximizar"}
         >
           {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
         </button>
-        
+
         <button
-          onClick={() => appWindow.close()}
+          onClick={() => appWindow.close().catch(() => {})}
           className="text-muted-foreground hover:bg-destructive hover:text-destructive-foreground rounded-md p-1.5 transition-colors"
           title="Cerrar"
         >

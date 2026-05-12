@@ -3,19 +3,20 @@ use crate::runner::{
 };
 use crate::security::{PermissionPolicy, SecurityLimits, SecurityMode};
 use crate::utils::transpiler::{transpile_source, SourceLanguage};
+use std::io::Write as _;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::AppHandle;
+use tempfile::Builder;
 
 pub struct RuntimeManager {
   sandbox: Sandbox,
-  permissions: PermissionPolicy,
 }
 
 impl RuntimeManager {
-  pub fn new(permissions: PermissionPolicy, _limits: SecurityLimits) -> Self {
-    Self { sandbox: Sandbox::new(), permissions }
+  pub fn new() -> Self {
+    Self { sandbox: Sandbox::new() }
   }
 
   pub async fn execute(
@@ -31,15 +32,29 @@ impl RuntimeManager {
     let start = Instant::now();
     let limits = SecurityLimits::for_mode(mode);
 
-    self.sandbox.validate(&code, runtime, mode, &self.permissions)?;
+    self.sandbox.validate(&code, runtime, mode, &PermissionPolicy::for_mode(mode))?;
 
     let lang = SourceLanguage::from_str(&language);
     let transpiled = transpile_source(&code, lang)?;
     let executable = transpiled.code;
 
+    // Write transpiled code to a .mjs temp file and immediately close our write
+    // handle. TempPath holds the path and deletes the file on drop — no open
+    // descriptor means Windows can open the file for reading without conflicts.
+    // The binding stays in scope past run_streaming so the file outlives the process.
+    let temp_path = {
+      let mut f = Builder::new()
+        .suffix(".mjs")
+        .tempfile()
+        .map_err(|e| RuntimeError::Process(format!("failed to create temp file: {e}")))?;
+      f.write_all(executable.as_bytes())
+        .map_err(|e| RuntimeError::Process(format!("failed to write temp file: {e}")))?;
+      f.into_temp_path()
+    };
+
     let command = match runtime {
-      RuntimeKind::Node => node_runner::build_command(&executable),
-      RuntimeKind::Deno => deno_runner::build_command(&executable),
+      RuntimeKind::Node => node_runner::build_command(&temp_path),
+      RuntimeKind::Deno => deno_runner::build_command(&temp_path),
       RuntimeKind::Bun => {
         return Err(RuntimeError::Unsupported(
           "Bun runtime is reserved for future integration".into(),

@@ -58,6 +58,15 @@ export const transpileCode = (code, language) =>
     request: { code, language: normalizeLanguage(language) },
   });
 
+/**
+ * Returns which runtimes are available on the host machine.
+ * Probed once at app startup; this call reads the cached result.
+ *
+ * @returns {Promise<{ node: boolean, deno: boolean, bun: boolean }>}
+ */
+export const getRuntimeAvailability = () =>
+  invokeSafe('get_runtime_availability', {});
+
 // ─── Typed event subscriptions ────────────────────────────────────────────────
 
 /**

@@ -40,6 +40,9 @@ export default function App() {
   const [liveResults, setLiveResults] = useState([]);
   const [editingTabId, setEditingTabId] = useState(null);
   const [tabTitleDraft, setTabTitleDraft] = useState('');
+  // Optimistic default: assume node/deno are present until the probe returns.
+  // bun is always false — the runtime is not yet implemented.
+  const [runtimeAvailability, setRuntimeAvailability] = useState({ node: true, deno: true, bun: false });
   
   // Actualizar StatusBar cuando cambie el estado
   useEffect(() => {
@@ -63,6 +66,22 @@ export default function App() {
   useHotkeys({
     onRun: () => handleExecute(),
   });
+
+  useEffect(() => {
+    ipc.getRuntimeAvailability()
+      .then((av) => {
+        setRuntimeAvailability(av);
+        // If the default runtime is not installed, switch to the first available one.
+        if (!av[state.runtime]) {
+          const first = ['node', 'deno'].find((r) => av[r]);
+          if (first) dispatch({ type: 'runtime.change', payload: first });
+        }
+      })
+      .catch(() => {
+        // Outside Tauri (browser dev mode) — keep optimistic defaults.
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally runs once on mount
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -216,6 +235,7 @@ export default function App() {
                   securityMode={state.securityMode}
                   onRuntimeChange={(runtime) => dispatch({ type: 'runtime.change', payload: runtime })}
                   onSecurityModeChange={(mode) => dispatch({ type: 'security.change', payload: mode })}
+                  availability={runtimeAvailability}
                 />
                 <div className="flex items-center gap-2">
                   <span className="text-xs uppercase tracking-wide text-muted-foreground">Language</span>

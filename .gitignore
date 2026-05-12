@@ -6,6 +6,7 @@ package-lock.json
 yarn.lock
 pnpm-lock.yaml
 .github
+.gitignore
 
 # Logs
 *.log
@@ -74,3 +75,11 @@ build
 
 # Coverage
 coverage
+
+
+# =========================
+# CLAUDE
+# =========================
+# These are files that were recently edited. Do not suggest code that has been deleted.
+CLAUDE.md
+.claude

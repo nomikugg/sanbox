@@ -1,3 +1,5 @@
+use crate::security::SecurityMode;
+
 #[derive(Debug, Clone)]
 pub struct PermissionPolicy {
   pub filesystem: bool,
@@ -31,6 +33,14 @@ impl PermissionPolicy {
       network: false,
       environment: false,
       child_process: false,
+    }
+  }
+
+  pub fn for_mode(mode: SecurityMode) -> Self {
+    match mode {
+      SecurityMode::Strict => Self::strict(),
+      SecurityMode::Balanced => Self::balanced(),
+      SecurityMode::Debug => Self::debug(),
     }
   }
 }

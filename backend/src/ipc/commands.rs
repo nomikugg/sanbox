@@ -1,13 +1,35 @@
 use crate::debugger::{DebuggerCoordinator, DebugSession};
 use crate::runner::{ExecutionResponse, RuntimeKind, RuntimeManager};
-use crate::security::{PermissionPolicy, SecurityLimits, SecurityMode};
+use crate::security::SecurityMode;
 use crate::utils::transpiler::{transpile_source, SourceLanguage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, State};
 use uuid::Uuid;
+
+// ─── Runtime availability ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeAvailability {
+  pub node: bool,
+  pub deno: bool,
+  pub bun: bool,
+}
+
+// Checks whether `binary` is on PATH and exits successfully with --version.
+// Stdout and stderr are discarded — we only care about reachability.
+fn probe_available(binary: &str) -> bool {
+  std::process::Command::new(binary)
+    .arg("--version")
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .status()
+    .map(|s| s.success())
+    .unwrap_or(false)
+}
 
 // ─── App state ───────────────────────────────────────────────────────────────
 
@@ -16,16 +38,25 @@ pub struct AppState {
   pub runtime_manager: Arc<RuntimeManager>,
   pub debugger: Arc<DebuggerCoordinator>,
   pub active_executions: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+  pub availability: RuntimeAvailability,
 }
 
 impl AppState {
   pub fn new() -> Self {
-    let permissions = PermissionPolicy::strict();
-    let limits = SecurityLimits::for_mode(SecurityMode::Strict);
+    // Probe node and deno in parallel threads so startup delay is
+    // max(node_time, deno_time) rather than their sum.
+    let node_probe = std::thread::spawn(|| probe_available("node"));
+    let deno_probe = std::thread::spawn(|| probe_available("deno"));
+    let availability = RuntimeAvailability {
+      node: node_probe.join().unwrap_or(false),
+      deno: deno_probe.join().unwrap_or(false),
+      bun: false, // reserved until the Bun runtime is implemented
+    };
     Self {
-      runtime_manager: Arc::new(RuntimeManager::new(permissions, limits)),
+      runtime_manager: Arc::new(RuntimeManager::new()),
       debugger: Arc::new(DebuggerCoordinator::new()),
       active_executions: Arc::new(Mutex::new(HashMap::new())),
+      availability,
     }
   }
 }
@@ -182,4 +213,9 @@ pub fn stop_execution(
   }
 
   Ok(false)
+}
+
+#[tauri::command]
+pub fn get_runtime_availability(state: State<'_, AppState>) -> RuntimeAvailability {
+  state.availability.clone()
 }
