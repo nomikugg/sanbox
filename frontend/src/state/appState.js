@@ -65,13 +65,24 @@ function updateActiveTab(state, updater) {
 }
 
 function appendHistory(state, payload) {
+  // Logs are now streamed in real-time into state.logs.
+  // Build a compact output string from whatever was collected before this call.
+  const stdout = state.logs
+    .filter((l) => l.kind !== 'error')
+    .map((l) => l.message)
+    .join('\n') || null;
+  const stderr = state.logs
+    .filter((l) => l.kind === 'error')
+    .map((l) => l.message)
+    .join('\n') || payload.error || null;
+
   const entry = {
     id: crypto.randomUUID(),
     runtime: state.runtime,
     timestamp: new Date().toISOString(),
     code: state.code,
-    output: payload.output ?? null,
-    error: payload.error ?? null,
+    output: stdout,
+    error: stderr,
   };
   return [entry, ...state.history].slice(0, 25);
 }
@@ -138,12 +149,16 @@ export function appReducer(state, action) {
     case 'history.select':
       return { ...state, activeHistoryId: action.payload };
     case 'execution.start':
-      return { 
-        ...state, 
-        isExecuting: true, 
+      return {
+        ...state,
+        isExecuting: true,
         error: null,
         logs: [],
       };
+    case 'log.append': {
+      const entry = { kind: action.payload.kind, message: action.payload.message };
+      return { ...state, logs: [...state.logs, entry] };
+    }
     case 'execution.success':
       return {
         ...state,

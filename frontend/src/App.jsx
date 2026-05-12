@@ -9,6 +9,7 @@ import RuntimeSelector from './components/RuntimeSelector.jsx';
 import { initialState, appReducer } from './state/appState.js';
 import useHotkeys from './hooks/useHotkeys.js';
 import useIpc from './hooks/useIpc.js';
+import { useConsoleStream } from './hooks/useConsoleStream.js';
 import AppSidebar from './components/AppSidebar.jsx';
 import GroupIcons from './components/GroupIcons.jsx';
 import { useStatusBar } from './contexts/StatusBarContext.jsx';
@@ -30,6 +31,11 @@ export default function App() {
   })());
   const ipc = useIpc();
   const { setStatus, setMetrics } = useStatusBar();
+
+  // Stream stdout/stderr events from backend into the console in real-time
+  useConsoleStream({
+    onLog: (payload) => dispatch({ type: 'log.append', payload }),
+  });
 
   const [liveResults, setLiveResults] = useState([]);
   const [editingTabId, setEditingTabId] = useState(null);

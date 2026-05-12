@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::State;
+use tauri::{AppHandle, State};
 use uuid::Uuid;
+
+// ─── App state ───────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct AppState {
@@ -20,7 +22,6 @@ impl AppState {
   pub fn new() -> Self {
     let permissions = PermissionPolicy::strict();
     let limits = SecurityLimits::for_mode(SecurityMode::Strict);
-
     Self {
       runtime_manager: Arc::new(RuntimeManager::new(permissions, limits)),
       debugger: Arc::new(DebuggerCoordinator::new()),
@@ -28,6 +29,8 @@ impl AppState {
     }
   }
 }
+
+// ─── Request / response types ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -97,8 +100,16 @@ pub struct StopExecutionRequest {
   pub execution_id: String,
 }
 
+// ─── IPC commands ────────────────────────────────────────────────────────────
+
+/// Executes code and streams stdout/stderr as `execution:stdout` / `execution:stderr`
+/// Tauri events in real-time. Returns final metrics when the process exits.
 #[tauri::command]
-pub async fn execute_code(request: ExecuteCodeRequest, state: State<'_, AppState>) -> Result<ExecutionResponse, String> {
+pub async fn execute_code(
+  request: ExecuteCodeRequest,
+  state: State<'_, AppState>,
+  app: AppHandle,
+) -> Result<ExecutionResponse, String> {
   let execution_id = Uuid::new_v4().to_string();
   let cancel = Arc::new(AtomicBool::new(false));
   let runtime_manager = Arc::clone(&state.runtime_manager);
@@ -111,55 +122,55 @@ pub async fn execute_code(request: ExecuteCodeRequest, state: State<'_, AppState
     active.insert(execution_id.clone(), Arc::clone(&cancel));
   }
 
-  let execution_id_for_worker = execution_id.clone();
-  let response = tauri::async_runtime::spawn_blocking(move || {
-    runtime_manager
-      .execute(
-        execution_id_for_worker,
-        request.code,
-        request.language,
-        request.runtime.into(),
-        request.mode.into(),
-        cancel,
-      )
-      .map_err(|error| error.to_string())
-  })
-  .await
-  .map_err(|error| format!("execution worker failed: {error}"))?;
+  let result = runtime_manager
+    .execute(
+      app,
+      execution_id.clone(),
+      request.code,
+      request.language,
+      request.runtime.into(),
+      request.mode.into(),
+      cancel,
+    )
+    .await
+    .map_err(|e| e.to_string());
 
-  if let Ok(result) = &response {
-    state.debugger.capture_execution(&execution_id, result);
+  if let Ok(exec_result) = &result {
+    state.debugger.capture_execution(&execution_id, exec_result);
   }
 
   if let Ok(mut active) = state.active_executions.lock() {
     active.remove(&execution_id);
   }
 
-  response
+  result
 }
 
 #[tauri::command]
-pub async fn debug_code(request: DebugCodeRequest, state: State<'_, AppState>) -> Result<DebugSession, String> {
+pub async fn debug_code(
+  request: DebugCodeRequest,
+  state: State<'_, AppState>,
+) -> Result<DebugSession, String> {
   let runtime = request.runtime.into();
   state
     .debugger
     .prepare_session(request.code, runtime)
     .await
-    .map_err(|error| error.to_string())
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn transpile_code(request: TranspileCodeRequest) -> Result<TranspileCodeResponse, String> {
   let language = SourceLanguage::from_str(&request.language);
-  let transpiled = transpile_source(&request.code, language).map_err(|error| error.to_string())?;
-  Ok(TranspileCodeResponse {
-    code: transpiled.code,
-    source_map: transpiled.source_map,
-  })
+  let transpiled = transpile_source(&request.code, language).map_err(|e| e.to_string())?;
+  Ok(TranspileCodeResponse { code: transpiled.code, source_map: transpiled.source_map })
 }
 
 #[tauri::command]
-pub fn stop_execution(request: StopExecutionRequest, state: State<'_, AppState>) -> Result<bool, String> {
+pub fn stop_execution(
+  request: StopExecutionRequest,
+  state: State<'_, AppState>,
+) -> Result<bool, String> {
   let active = state
     .active_executions
     .lock()
